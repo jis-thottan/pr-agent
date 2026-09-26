@@ -1,0 +1,52 @@
+# Team setup: app + Postgres. Local AI is optional:
+#   docker compose --profile ollama up -d
+#   docker compose exec ollama ollama pull qwen2.5-coder:14b
+services:
+  app:
+    build: .
+    image: pull-request-ai:latest
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://prai:${POSTGRES_PASSWORD:-prai}@db:5432/prai
+    depends_on:
+      db:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # reach Ollama / LM Studio running on the host
+    restart: unless-stopped
+
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: prai
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-prai}
+      POSTGRES_DB: prai
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prai"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    environment:
+      # Ollama's default context is small; reviews need room for diffs.
+      OLLAMA_CONTEXT_LENGTH: "16384"
+    volumes:
+      - ollama:/root/.ollama
+    # Uncomment for NVIDIA GPUs:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices: [{ driver: nvidia, count: all, capabilities: [gpu] }]
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  ollama:
