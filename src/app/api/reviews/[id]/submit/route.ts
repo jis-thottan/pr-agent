@@ -58,4 +58,4 @@ export const POST = route<{ params: Promise<{ id: string }> }>(async (req, { use
     url,
   });
   return { url, comments: payload.comments.length };
-});
+}, { perm: "post" });

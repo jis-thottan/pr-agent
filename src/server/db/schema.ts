@@ -11,12 +11,72 @@ import {
   index,
 } from "drizzle-orm/pg-core";
 
+export const ROLES = ["admin", "lead", "reviewer", "viewer"] as const;
+export type Role = (typeof ROLES)[number];
+
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   email: text("email").notNull().unique(),
   name: text("name").notNull(),
-  passwordHash: text("password_hash").notNull(),
-  role: text("role", { enum: ["admin", "reviewer"] }).notNull().default("reviewer"),
+  // Null for accounts that only sign in with SSO.
+  passwordHash: text("password_hash"),
+  role: text("role", { enum: ROLES }).notNull().default("reviewer"),
+  disabledAt: timestamp("disabled_at", { withTimezone: true }),
+  lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Sign-in providers configured by admins (Entra ID, Google, generic OIDC, GitHub OAuth). */
+export const ssoProviders = pgTable("sso_providers", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  kind: text("kind", { enum: ["entra", "google", "oidc", "github"] }).notNull(),
+  name: text("name").notNull(),
+  // OIDC issuer URL; for GitHub the web base URL (https://github.com or a GHES host).
+  issuer: text("issuer").notNull(),
+  clientId: text("client_id").notNull(),
+  encryptedClientSecret: text("encrypted_client_secret").notNull(),
+  enabled: boolean("enabled").notNull().default(true),
+  // Lower-case email domains allowed to sign in; empty = any verified email.
+  allowedDomains: jsonb("allowed_domains").$type<string[]>().notNull().default([]),
+  autoCreateUsers: boolean("auto_create_users").notNull().default(true),
+  defaultRole: text("default_role", { enum: ROLES }).notNull().default("reviewer"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const userIdentities = pgTable(
+  "user_identities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    providerId: uuid("provider_id")
+      .notNull()
+      .references(() => ssoProviders.id, { onDelete: "cascade" }),
+    subject: text("subject").notNull(),
+    email: text("email"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("user_identities_uq").on(t.providerId, t.subject), index("user_identities_user_idx").on(t.userId)],
+);
+
+/**
+ * Server-wide app registrations used to connect code hosts without personal tokens:
+ * a GitHub App (installation tokens) or an Entra ID app for Azure DevOps OAuth.
+ */
+export const codeHostApps = pgTable("code_host_apps", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  kind: text("kind", { enum: ["github_app", "entra_devops"] }).notNull(),
+  name: text("name").notNull(),
+  // GitHub: API base URL (https://api.github.com or https://host/api/v3). Entra: tenant ID or "organizations".
+  baseUrl: text("base_url").notNull(),
+  // GitHub web URL for install links (https://github.com or the GHES host).
+  webUrl: text("web_url"),
+  appId: text("app_id"),
+  slug: text("slug"),
+  clientId: text("client_id").notNull(),
+  encryptedClientSecret: text("encrypted_client_secret").notNull(),
+  encryptedPrivateKey: text("encrypted_private_key"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -37,6 +97,11 @@ export const scmConnections = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     provider: text("provider", { enum: ["github", "azure_devops"] }).notNull(),
+    // pat: encryptedToken is a personal access token. github_app: installationId + appId.
+    // entra_oauth: encryptedToken is an Entra refresh token for Azure DevOps.
+    authType: text("auth_type", { enum: ["pat", "github_app", "entra_oauth"] }).notNull().default("pat"),
+    appId: uuid("app_id").references(() => codeHostApps.id, { onDelete: "cascade" }),
+    installationId: text("installation_id"),
     name: text("name").notNull(),
     baseUrl: text("base_url").notNull(),
     encryptedToken: text("encrypted_token").notNull(),
@@ -46,11 +111,15 @@ export const scmConnections = pgTable(
   (t) => [index("scm_connections_user_idx").on(t.userId)],
 );
 
+export const AI_PROVIDER_TYPES = ["openai_compatible", "azure_openai", "anthropic", "gemini"] as const;
+
 export const aiProviders = pgTable("ai_providers", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
-  type: text("type", { enum: ["openai_compatible"] }).notNull().default("openai_compatible"),
+  type: text("type", { enum: AI_PROVIDER_TYPES }).notNull().default("openai_compatible"),
   baseUrl: text("base_url").notNull(),
+  // Azure OpenAI only: the api-version query parameter.
+  apiVersion: text("api_version"),
   encryptedApiKey: text("encrypted_api_key"),
   model: text("model").notNull(),
   temperature: real("temperature").notNull().default(0.1),
@@ -58,10 +127,63 @@ export const aiProviders = pgTable("ai_providers", {
   jsonMode: boolean("json_mode").notNull().default(true),
   isLocal: boolean("is_local").notNull().default(false),
   isDefault: boolean("is_default").notNull().default(false),
+  // USD per million tokens; null means "not priced" (e.g. a local model) and costs nothing.
+  inputCostPerMTok: real("input_cost_per_mtok"),
+  outputCostPerMTok: real("output_cost_per_mtok"),
+  // Month-to-date spend cap across all users; null = unlimited.
+  monthlyBudgetUsd: real("monthly_budget_usd"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export type ReviewProgress = { done: number; total: number; current?: string };
+
+export const SEVERITIES = ["critical", "major", "minor", "nit"] as const;
+export const CATEGORIES = [
+  "bug",
+  "security",
+  "performance",
+  "maintainability",
+  "style",
+  "tests",
+  "docs",
+] as const;
+export type Severity = (typeof SEVERITIES)[number];
+export type Category = (typeof CATEGORIES)[number];
+
+/** Saved run settings: a reviewer's own, or shared with everyone on the server. */
+export const reviewProfiles = pgTable(
+  "review_profiles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    shared: boolean("shared").notNull().default(false),
+    providerId: uuid("provider_id").references(() => aiProviders.id, { onDelete: "set null" }),
+    instructions: text("instructions"),
+    extraIgnore: jsonb("extra_ignore").$type<string[]>().notNull().default([]),
+    fullFileContext: boolean("full_file_context").notNull().default(true),
+    minSeverity: text("min_severity", { enum: SEVERITIES }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("review_profiles_user_idx").on(t.userId)],
+);
+
+/** What a review actually applied from the repository's .pr-review.yml (for the Overview tab). */
+export type AppliedRepoRules = {
+  path: string;
+  ref: string;
+  instructions: string | null;
+  ignore: string[];
+  minSeverity: Severity | null;
+  pathInstructions: { path: string; instructions: string }[];
+  warnings: string[];
+};
+
+export const REVIEW_STATUSES = ["queued", "running", "completed", "failed"] as const;
 
 export const reviews = pgTable(
   "reviews",
@@ -81,7 +203,18 @@ export const reviews = pgTable(
     providerId: uuid("provider_id").references(() => aiProviders.id, { onDelete: "set null" }),
     model: text("model").notNull(),
     instructions: text("instructions"),
-    status: text("status", { enum: ["running", "completed", "failed"] }).notNull().default("running"),
+    profileId: uuid("profile_id").references(() => reviewProfiles.id, { onDelete: "set null" }),
+    minSeverity: text("min_severity", { enum: SEVERITIES }),
+    repoRules: jsonb("repo_rules").$type<AppliedRepoRules>(),
+    status: text("status", { enum: REVIEW_STATUSES }).notNull().default("running"),
+    trigger: text("trigger", { enum: ["manual", "webhook"] }).notNull().default("manual"),
+    autoRuleId: uuid("auto_rule_id"),
+    // Incremental reviews: the earlier review whose findings on unchanged files were carried forward.
+    baseReviewId: uuid("base_review_id"),
+    // Blob SHA of every PR file at review time, so a later review can skip unchanged files.
+    fileShas: jsonb("file_shas").$type<Record<string, string>>().notNull().default({}),
+    unchangedFiles: jsonb("unchanged_files").$type<string[]>().notNull().default([]),
+    costUsd: real("cost_usd").notNull().default(0),
     progress: jsonb("progress").$type<ReviewProgress>().notNull().default({ done: 0, total: 0 }),
     summary: text("summary"),
     riskLevel: text("risk_level", { enum: ["low", "medium", "high"] }),
@@ -95,21 +228,11 @@ export const reviews = pgTable(
     postedAt: timestamp("posted_at", { withTimezone: true }),
     postedUrl: text("posted_url"),
   },
-  (t) => [index("reviews_pr_idx").on(t.connectionId, t.owner, t.repo, t.prNumber)],
+  (t) => [
+    index("reviews_pr_idx").on(t.connectionId, t.owner, t.repo, t.prNumber),
+    index("reviews_user_trigger_idx").on(t.userId, t.trigger, t.createdAt),
+  ],
 );
-
-export const SEVERITIES = ["critical", "major", "minor", "nit"] as const;
-export const CATEGORIES = [
-  "bug",
-  "security",
-  "performance",
-  "maintainability",
-  "style",
-  "tests",
-  "docs",
-] as const;
-export type Severity = (typeof SEVERITIES)[number];
-export type Category = (typeof CATEGORIES)[number];
 
 export const findings = pgTable(
   "findings",
@@ -129,6 +252,8 @@ export const findings = pgTable(
     title: text("title").notNull(),
     body: text("body").notNull(),
     suggestion: text("suggestion"),
+    // Set when an incremental review copied this finding from an earlier review of an unchanged file.
+    carriedFromId: uuid("carried_from_id"),
     state: text("state", { enum: ["pending", "accepted", "dismissed", "posted"] })
       .notNull()
       .default("pending"),
@@ -163,8 +288,109 @@ export const auditLog = pgTable("audit_log", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/** Durable background work (reviews, webhook-triggered reviews), claimed with FOR UPDATE SKIP LOCKED. */
+export const jobs = pgTable(
+  "jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    type: text("type", { enum: ["review", "auto_review"] }).notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    status: text("status", { enum: ["queued", "running", "completed", "failed"] }).notNull().default("queued"),
+    attempts: integer("attempts").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull().default(3),
+    runAt: timestamp("run_at", { withTimezone: true }).notNull().defaultNow(),
+    lockedAt: timestamp("locked_at", { withTimezone: true }),
+    lockedBy: text("locked_by"),
+    lastError: text("last_error"),
+    // Webhook deliveries are retried by the host; this makes enqueueing idempotent.
+    dedupeKey: text("dedupe_key"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (t) => [index("jobs_claim_idx").on(t.status, t.runAt), uniqueIndex("jobs_dedupe_uq").on(t.dedupeKey)],
+);
+
+/** Webhook-triggered draft reviews for one repository, owned by the user whose connection runs them. */
+export const autoReviewRules = pgTable(
+  "auto_review_rules",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    connectionId: uuid("connection_id")
+      .notNull()
+      .references(() => scmConnections.id, { onDelete: "cascade" }),
+    owner: text("owner").notNull(),
+    repo: text("repo").notNull(),
+    providerId: uuid("provider_id").references(() => aiProviders.id, { onDelete: "set null" }),
+    profileId: uuid("profile_id").references(() => reviewProfiles.id, { onDelete: "set null" }),
+    encryptedSecret: text("encrypted_secret").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    onOpen: boolean("on_open").notNull().default(true),
+    onPush: boolean("on_push").notNull().default(true),
+    skipDrafts: boolean("skip_drafts").notNull().default(true),
+    incremental: boolean("incremental").notNull().default(true),
+    lastDeliveryAt: timestamp("last_delivery_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("auto_review_rules_uq").on(t.userId, t.connectionId, t.owner, t.repo)],
+);
+
+/** One row per model call, for cost reporting and budget enforcement. */
+export const aiUsage = pgTable(
+  "ai_usage",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    providerId: uuid("provider_id").references(() => aiProviders.id, { onDelete: "set null" }),
+    reviewId: uuid("review_id").references(() => reviews.id, { onDelete: "set null" }),
+    kind: text("kind", { enum: ["review", "chat", "test"] }).notNull(),
+    model: text("model").notNull(),
+    promptTokens: integer("prompt_tokens").notNull().default(0),
+    completionTokens: integer("completion_tokens").notNull().default(0),
+    costUsd: real("cost_usd").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("ai_usage_created_idx").on(t.createdAt), index("ai_usage_user_idx").on(t.userId, t.createdAt)],
+);
+
+export const chatMessages = pgTable(
+  "chat_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    connectionId: uuid("connection_id")
+      .notNull()
+      .references(() => scmConnections.id, { onDelete: "cascade" }),
+    prKey: text("pr_key").notNull(),
+    role: text("role", { enum: ["user", "assistant"] }).notNull(),
+    content: text("content").notNull(),
+    model: text("model"),
+    // The head commit the answer was based on.
+    headSha: text("head_sha"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("chat_messages_pr_idx").on(t.userId, t.connectionId, t.prKey, t.createdAt)],
+);
+
+/** Server-wide settings edited by admins, as key → JSON value. */
+export const appSettings = pgTable("app_settings", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").$type<unknown>().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export type User = typeof users.$inferSelect;
 export type ScmConnection = typeof scmConnections.$inferSelect;
 export type AiProvider = typeof aiProviders.$inferSelect;
 export type Review = typeof reviews.$inferSelect;
 export type Finding = typeof findings.$inferSelect;
+export type ReviewProfile = typeof reviewProfiles.$inferSelect;
+export type Job = typeof jobs.$inferSelect;
+export type AutoReviewRule = typeof autoReviewRules.$inferSelect;
+export type SsoProvider = typeof ssoProviders.$inferSelect;
+export type CodeHostApp = typeof codeHostApps.$inferSelect;

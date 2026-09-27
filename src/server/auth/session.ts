@@ -1,7 +1,7 @@
 import "server-only";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { and, eq, gt } from "drizzle-orm";
+import { and, eq, gt, isNull } from "drizzle-orm";
 import { getDb, schema } from "../db";
 import { randomToken, sha256 } from "../crypto";
 import type { User } from "../db/schema";
@@ -16,6 +16,7 @@ export async function createSession(userId: string): Promise<void> {
   const token = randomToken();
   const expiresAt = new Date(Date.now() + TTL_MS);
   await db.insert(schema.sessions).values({ id: sha256(token), userId, expiresAt });
+  await db.update(schema.users).set({ lastLoginAt: new Date() }).where(eq(schema.users.id, userId));
   (await cookies()).set(COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
@@ -48,7 +49,7 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
     })
     .from(schema.sessions)
     .innerJoin(schema.users, eq(schema.users.id, schema.sessions.userId))
-    .where(and(eq(schema.sessions.id, sha256(token)), gt(schema.sessions.expiresAt, new Date())))
+    .where(and(eq(schema.sessions.id, sha256(token)), gt(schema.sessions.expiresAt, new Date()), isNull(schema.users.disabledAt)))
     .limit(1);
   return rows[0] ?? null;
 }

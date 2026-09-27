@@ -38,22 +38,46 @@ export function useApi<T>(path: string | null) {
 export type Connection = {
   id: string;
   provider: "github" | "azure_devops";
+  authType?: "pat" | "github_app" | "entra_oauth";
   name: string;
   baseUrl: string;
   accountLogin: string | null;
   createdAt: string;
 };
 
+export type AiProviderType = "openai_compatible" | "azure_openai" | "anthropic" | "gemini";
+
 export type AiProviderInfo = {
   id: string;
   name: string;
-  type: "openai_compatible";
+  type: AiProviderType;
   baseUrl: string;
   model: string;
+  apiVersion: string | null;
   temperature: number;
   maxContextTokens: number;
   jsonMode: boolean;
   isLocal: boolean;
   isDefault: boolean;
   hasApiKey: boolean;
+  inputCostPerMTok: number | null;
+  outputCostPerMTok: number | null;
+  monthlyBudgetUsd: number | null;
+};
+
+export type Severity = "critical" | "major" | "minor" | "nit";
+
+export type ReviewProfileInfo = {
+  id: string;
+  userId: string;
+  ownerName: string;
+  name: string;
+  description: string | null;
+  shared: boolean;
+  providerId: string | null;
+  instructions: string | null;
+  extraIgnore: string[];
+  fullFileContext: boolean;
+  minSeverity: Severity | null;
+  updatedAt: string;
 };

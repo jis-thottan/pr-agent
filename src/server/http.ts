@@ -2,6 +2,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { getCurrentUser, type SessionUser } from "./auth/session";
+import { can, type Permission } from "@/lib/permissions";
 
 export class HttpError extends Error {
   constructor(
@@ -14,13 +15,20 @@ export class HttpError extends Error {
 
 type Handler<C> = (req: Request, ctx: C & { user: SessionUser }) => Promise<Response | unknown>;
 
-/** Wraps a route handler with auth, JSON serialisation and error mapping. */
-export function route<C>(handler: Handler<C>, opts: { admin?: boolean } = {}) {
+export function requirePermission(user: SessionUser, perm: Permission) {
+  if (!can(user.role, perm)) throw new HttpError(403, `Your role (${user.role}) can't do this`);
+}
+
+/**
+ * Wraps a route handler with auth, JSON serialisation and error mapping.
+ * `perm` defaults to "read" for GET and "review" for mutations.
+ */
+export function route<C>(handler: Handler<C>, opts: { perm?: Permission } = {}) {
   return async (req: Request, ctx: C): Promise<Response> => {
     try {
       const user = await getCurrentUser();
       if (!user) throw new HttpError(401, "Not signed in");
-      if (opts.admin && user.role !== "admin") throw new HttpError(403, "Admin only");
+      requirePermission(user, opts.perm ?? (req.method === "GET" ? "read" : "review"));
       // Basic CSRF defence for cookie-authenticated mutations.
       if (req.method !== "GET" && req.headers.get("x-requested-with") !== "fetch") {
         throw new HttpError(403, "Missing X-Requested-With header");

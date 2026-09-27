@@ -4,7 +4,6 @@ import fs from "node:fs";
 import { drizzle as drizzlePg } from "drizzle-orm/postgres-js";
 import { migrate as migratePg } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
-import { eq } from "drizzle-orm";
 import * as schema from "./schema";
 
 export type Db = ReturnType<typeof drizzlePg<typeof schema>>;
@@ -36,19 +35,10 @@ async function init(): Promise<Db> {
   return db as unknown as Db;
 }
 
-async function initAndRecover(): Promise<Db> {
-  const db = await init();
-  // Reviews run in-process; any still "running" at boot were interrupted by a restart.
-  await db
-    .update(schema.reviews)
-    .set({ status: "failed", error: "Interrupted by a server restart. Run the review again." })
-    .where(eq(schema.reviews.status, "running"));
-  return db;
-}
-
+// Interrupted reviews are recovered by the job worker (src/server/jobs/worker.ts), not here.
 export function getDb(): Promise<Db> {
   if (!globalForDb.__prDb) {
-    globalForDb.__prDb = initAndRecover().catch((err) => {
+    globalForDb.__prDb = init().catch((err) => {
       globalForDb.__prDb = undefined;
       throw err;
     });

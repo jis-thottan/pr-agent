@@ -22,11 +22,14 @@ export function reviewUserPrompt(opts: {
   title: string;
   description: string;
   instructions?: string | null;
+  /** From .pr-review.yml on the target branch, including path-scoped rules for this batch. */
+  repoRules?: string | null;
   diff: string;
 }) {
   return [
     `Pull request: ${opts.title}`,
     opts.description ? `Description:\n${opts.description.slice(0, 3000)}` : "",
+    opts.repoRules ? `Repository review rules (maintained by the team; follow these):\n${opts.repoRules}` : "",
     opts.instructions ? `Additional review instructions from the tech lead (follow these):\n${opts.instructions}` : "",
     `Changes to review:\n\n${opts.diff}`,
   ]
@@ -51,6 +54,7 @@ export function summaryUserPrompt(opts: {
   files: { path: string; status: string; additions: number; deletions: number }[];
   findings: { path: string; line: number | null; severity: string; title: string }[];
   instructions?: string | null;
+  note?: string | null;
 }) {
   const files = opts.files
     .slice(0, 200)
@@ -66,6 +70,7 @@ export function summaryUserPrompt(opts: {
     `Pull request: ${opts.title}`,
     opts.description ? `Description:\n${opts.description.slice(0, 3000)}` : "",
     opts.instructions ? `Tech lead's review focus:\n${opts.instructions}` : "",
+    opts.note ?? "",
     `Changed files:\n${files}`,
     `Line-level findings from the detailed review:\n${findings}`,
   ]

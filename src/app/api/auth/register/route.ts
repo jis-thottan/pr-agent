@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import { count } from "drizzle-orm";
 import { getDb, schema } from "@/server/db";
 import { createSession } from "@/server/auth/session";
+import { getAuthSettings } from "@/server/auth/settings";
 import { audit, errorResponse, HttpError } from "@/server/http";
 
 const body = z.object({
@@ -20,6 +21,9 @@ export async function POST(req: Request) {
     const isFirst = n === 0;
     if (!isFirst && process.env.ALLOW_REGISTRATION !== "true") {
       throw new HttpError(403, "Registration is disabled. Ask an admin to enable ALLOW_REGISTRATION.");
+    }
+    if (!isFirst && !(await getAuthSettings()).localLogin) {
+      throw new HttpError(403, "Password accounts are turned off. Sign in with single sign-on.");
     }
     const [user] = await db
       .insert(schema.users)

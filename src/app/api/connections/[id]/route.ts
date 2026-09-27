@@ -9,4 +9,4 @@ export const DELETE = route<{ params: Promise<{ id: string }> }>(async (_req, { 
     .delete(schema.scmConnections)
     .where(and(eq(schema.scmConnections.id, id), eq(schema.scmConnections.userId, user.id)));
   await audit(user.id, "connection.delete", { id });
-});
+}, { perm: "read" });

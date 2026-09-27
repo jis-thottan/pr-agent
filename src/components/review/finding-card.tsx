@@ -75,6 +75,7 @@ export function FindingCard({
               <Badge tone="accent">your comment</Badge>
             )}
             <span className="font-semibold">{f.source === "ai" ? f.title : ""}</span>
+            {f.carriedFromId && <span className="text-xs text-muted" title="The file hasn't changed since the earlier review, so this finding was carried over from it.">carried over</span>}
             {!f.inDiff && f.line && <span className="text-xs text-warn" title="This line is outside the diff. The finding will go in the review summary.">outside diff · L{f.line}</span>}
             <span className="ml-auto text-xs text-muted">
               {f.state === "accepted" && <span className="text-ok">✓ will be posted</span>}
@@ -151,7 +152,7 @@ function FindingEditor({ finding, onSave, onCancel }: { finding: Finding; onSave
       )}
       <Textarea rows={Math.min(12, Math.max(3, body.split("\n").length + 1))} value={body} onChange={(e) => setBody(e.target.value)} autoFocus />
       <details open={Boolean(suggestion)}>
-        <summary className="cursor-pointer text-xs text-muted">Suggested replacement code (optional; posted as a GitHub suggestion)</summary>
+        <summary className="cursor-pointer text-xs text-muted">Suggested replacement code (optional; posted as a suggestion block)</summary>
         <Textarea rows={Math.min(12, Math.max(2, suggestion.split("\n").length + 1))} value={suggestion} onChange={(e) => setSuggestion(e.target.value)} className="mt-1" placeholder="Replacement for the commented line(s)" />
       </details>
       <div className="flex items-center justify-end gap-2">

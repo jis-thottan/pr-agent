@@ -23,7 +23,7 @@ export const PATCH = route<Ctx>(
     });
     await audit(user.id, "ai_provider.update", { id });
   },
-  { admin: true },
+  { perm: "manageProviders" },
 );
 
 export const DELETE = route<Ctx>(
@@ -33,5 +33,5 @@ export const DELETE = route<Ctx>(
     await db.delete(schema.aiProviders).where(eq(schema.aiProviders.id, id));
     await audit(user.id, "ai_provider.delete", { id });
   },
-  { admin: true },
+  { perm: "manageProviders" },
 );

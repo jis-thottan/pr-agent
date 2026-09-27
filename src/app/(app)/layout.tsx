@@ -14,12 +14,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <span className="flex h-6 w-6 items-center justify-center rounded bg-accent font-mono text-sm text-accent-fg">⌥</span>
           PR Review AI
         </Link>
-        <NavLinks />
+        <NavLinks role={user.role} />
         <div className="ml-auto flex items-center gap-2 text-sm">
           <ThemeToggle />
           <span className="text-muted" title={user.email}>
             {user.name}
-            {user.role === "admin" && <span className="ml-1.5 rounded border border-border px-1 text-[11px]">admin</span>}
+            {user.role !== "reviewer" && <span className="ml-1.5 rounded border border-border px-1 text-[11px]">{user.role}</span>}
           </span>
           <SignOutButton />
         </div>

@@ -4,17 +4,30 @@ import { getDb, schema } from "../db";
 import { decrypt } from "../crypto";
 import { HttpError } from "../http";
 import type { ScmConnection } from "../db/schema";
+import { AzureDevOpsProvider } from "./azure-devops";
 import { GitHubProvider } from "./github";
+import { entraAccessToken, githubInstallationToken } from "./app-auth";
 import type { ScmProvider } from "./types";
 
-export function providerFor(conn: Pick<ScmConnection, "provider" | "baseUrl" | "encryptedToken">): ScmProvider {
-  const token = decrypt(conn.encryptedToken);
-  switch (conn.provider) {
-    case "github":
-      return new GitHubProvider(token, conn.baseUrl);
-    case "azure_devops":
-      throw new HttpError(501, "Azure DevOps support arrives in Phase 2");
+type ConnLike = Pick<ScmConnection, "provider" | "baseUrl" | "encryptedToken"> &
+  Partial<Pick<ScmConnection, "id" | "authType" | "appId" | "installationId" | "accountLogin">>;
+
+export function providerFor(conn: ConnLike): ScmProvider {
+  const authType = conn.authType ?? "pat";
+  if (conn.provider === "github") {
+    if (authType === "github_app") {
+      if (!conn.installationId) throw new HttpError(500, "This GitHub App connection has no installation");
+      return new GitHubProvider(githubInstallationToken(conn.appId ?? null, conn.installationId), conn.baseUrl, {
+        installation: { reviewerLogin: conn.accountLogin ?? null },
+      });
+    }
+    return new GitHubProvider(decrypt(conn.encryptedToken), conn.baseUrl);
   }
+  if (authType === "entra_oauth") {
+    if (!conn.id) throw new HttpError(500, "This connection has no id");
+    return new AzureDevOpsProvider({ bearer: entraAccessToken({ id: conn.id, appId: conn.appId ?? null, encryptedToken: conn.encryptedToken }), scope: conn.id }, conn.baseUrl);
+  }
+  return new AzureDevOpsProvider({ pat: decrypt(conn.encryptedToken) }, conn.baseUrl);
 }
 
 /** Loads a connection owned by `userId` and returns it with its provider client. */

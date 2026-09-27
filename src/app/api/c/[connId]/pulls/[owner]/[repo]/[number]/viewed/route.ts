@@ -29,4 +29,4 @@ export const PUT = route<PrCtx>(async (req, { user, params }) => {
       target: [schema.viewedFiles.userId, schema.viewedFiles.connectionId, schema.viewedFiles.prKey, schema.viewedFiles.path],
       set: { sha: input.sha },
     });
-});
+}, { perm: "read" });

@@ -8,6 +8,27 @@
       "when": 1790421309500,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790424082188,
+      "tag": "0001_phase2",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790479743869,
+      "tag": "0002_phase3",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790483399664,
+      "tag": "0003_phase4",
+      "breakpoints": true
     }
   ]
 }

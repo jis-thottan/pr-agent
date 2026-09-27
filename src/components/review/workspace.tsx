@@ -13,10 +13,12 @@ import { RunDialog, type RunOptions } from "./run-dialog";
 import { SubmitDialog } from "./submit-dialog";
 import { Overview } from "./overview";
 import { FindingsList } from "./findings-list";
+import { ChatPanel } from "./chat-panel";
+import { HOST_LABEL, type HostType } from "@/lib/hosts";
 import type { DraftComment, Finding, FindingPatch, PrDetail, PrFile, Review, ReviewListItem } from "./types";
 
-type PrData = { pr: PrDetail; files: PrFile[]; viewed: { path: string; sha: string }[]; reviews: ReviewListItem[] };
-type Tab = "overview" | "files" | "findings";
+type PrData = { pr: PrDetail; files: PrFile[]; viewed: { path: string; sha: string }[]; reviews: ReviewListItem[]; host: HostType; canReview: boolean; canPost: boolean };
+type Tab = "overview" | "files" | "findings" | "chat";
 
 function readPref<T extends string>(key: string, fallback: T): T {
   try {
@@ -77,7 +79,7 @@ export function ReviewWorkspace({ connId, owner, repo, number }: { connId: strin
         if (cancelled) return;
         setReviewData(data);
         setReviewError(null);
-        if (data.review.status === "running") timer = setTimeout(load, 2000);
+        if (data.review.status === "running" || data.review.status === "queued") timer = setTimeout(load, 2000);
       } catch (err) {
         if (!cancelled) setReviewError((err as Error).message);
       }
@@ -200,7 +202,7 @@ export function ReviewWorkspace({ connId, owner, repo, number }: { connId: strin
     setReviewId(id);
     setTab("overview");
     prQ.setData((d) =>
-      d ? { ...d, reviews: [{ id, status: "running", model: "…", headSha: d.pr.headSha, createdAt: new Date().toISOString(), postedAt: null }, ...d.reviews] } : d,
+      d ? { ...d, reviews: [{ id, status: "queued", model: "…", headSha: d.pr.headSha, createdAt: new Date().toISOString(), postedAt: null }, ...d.reviews] } : d,
     );
   };
 
@@ -267,6 +269,9 @@ export function ReviewWorkspace({ connId, owner, repo, number }: { connId: strin
         case "3":
           setTab("findings");
           break;
+        case "4":
+          setTab("chat");
+          break;
         case "?":
           setDialog("help");
           break;
@@ -282,7 +287,9 @@ export function ReviewWorkspace({ connId, owner, repo, number }: { connId: strin
   if (prQ.loading && !prQ.data) return <div className="flex flex-1 items-center justify-center"><Spinner className="h-6 w-6" /></div>;
   if (prQ.error || !pr) return <div className="p-6"><ErrorNote error={prQ.error ?? "Pull request not found"} /></div>;
 
-  const running = review?.status === "running";
+  const running = review?.status === "running" || review?.status === "queued";
+  // The newest completed AI review at an older commit: the base for an incremental run.
+  const previousReview = prQ.data!.reviews.find((r) => r.status === "completed" && r.model !== "manual" && r.headSha !== pr.headSha) ?? null;
   const acceptedCount = findings.filter((f) => f.state === "accepted").length;
   const stale = review && review.headSha !== pr.headSha;
   const skipped = new Set(review?.skippedFiles ?? []);
@@ -313,7 +320,7 @@ export function ReviewWorkspace({ connId, owner, repo, number }: { connId: strin
               <span className="font-mono text-ok">+{pr.additions}</span>
               <span className="font-mono text-danger">-{pr.deletions}</span>
               {pr.mergeable === false && <Badge tone="danger">merge conflicts</Badge>}
-              <a href={pr.url} target="_blank" rel="noreferrer" className="text-accent hover:underline">Open on GitHub ↗</a>
+              <a href={pr.url} target="_blank" rel="noreferrer" className="text-accent hover:underline">Open on {HOST_LABEL[prQ.data!.host]} ↗</a>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -326,13 +333,13 @@ export function ReviewWorkspace({ connId, owner, repo, number }: { connId: strin
                 ))}
               </Select>
             )}
-            <Button onClick={() => setDialog("run")} disabled={running}>{running ? <><Spinner className="h-3.5 w-3.5" /> Reviewing…</> : "✦ Run AI review"}</Button>
+            {prQ.data!.canReview && <Button onClick={() => setDialog("run")} disabled={running}>{running ? <><Spinner className="h-3.5 w-3.5" /> {review?.status === "queued" ? "Queued…" : "Reviewing…"}</> : "✦ Run AI review"}</Button>}
             {review?.postedUrl && (
               <a href={review.postedUrl} target="_blank" rel="noreferrer" className="whitespace-nowrap text-xs text-ok hover:underline" title={`Posted ${timeAgo(review.postedAt)}`}>✓ Posted ↗</a>
             )}
-            <Button variant="primary" onClick={() => setDialog("submit")} disabled={!review || running}>
+            {prQ.data!.canPost && <Button variant="primary" onClick={() => setDialog("submit")} disabled={!review || running}>
               Submit review{acceptedCount > 0 && <span className="rounded-full bg-accent-fg/20 px-1.5 text-xs">{acceptedCount}</span>}
-            </Button>
+            </Button>}
             <button className="text-muted hover:text-fg" onClick={() => setDialog("help")} title="Keyboard shortcuts (?)"><Kbd>?</Kbd></button>
           </div>
         </div>
@@ -355,6 +362,7 @@ export function ReviewWorkspace({ connId, owner, repo, number }: { connId: strin
             ["overview", "Overview"],
             ["files", `Files ${files.length}`],
             ["findings", `Findings ${findings.filter((f) => f.state !== "dismissed").length}`],
+            ["chat", "Ask"],
           ] as const).map(([k, label]) => (
             <button key={k} onClick={() => setTab(k)} className={clsx("border-b-2 px-3 py-2", tab === k ? "border-accent font-medium" : "border-transparent text-muted hover:text-fg")}>{label}</button>
           ))}
@@ -370,6 +378,7 @@ export function ReviewWorkspace({ connId, owner, repo, number }: { connId: strin
         <div ref={mainRef} className="min-w-0 flex-1 overflow-y-auto">
           {tab === "overview" && <Overview pr={pr} review={review} findings={findings} onRun={() => setDialog("run")} />}
           {tab === "findings" && <FindingsList findings={findings} onOpen={focusFinding} />}
+          {tab === "chat" && <ChatPanel base={base} headSha={pr.headSha} focusPath={selectedPath} />}
           {tab === "files" && selectedFile && (
             <div>
               <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 border-b border-border bg-panel px-4 py-2">
@@ -427,11 +436,16 @@ export function ReviewWorkspace({ connId, owner, repo, number }: { connId: strin
         open={dialog === "run"}
         onClose={() => setDialog(null)}
         onRun={startReview}
-        repoKey={`${owner}/${repo}`}
+        connId={connId}
+        owner={owner}
+        repo={repo}
+        baseSha={pr.baseSha}
+        headSha={pr.headSha}
+        previousReview={previousReview}
         stats={{ files: files.length, additions: pr.additions, deletions: pr.deletions }}
       />
       {review && (
-        <SubmitDialog open={dialog === "submit"} onClose={() => setDialog(null)} review={review} findings={findings} prMoved={Boolean(stale)} onSubmit={submitReview} />
+        <SubmitDialog host={prQ.data!.host} open={dialog === "submit"} onClose={() => setDialog(null)} review={review} findings={findings} prMoved={Boolean(stale)} onSubmit={submitReview} />
       )}
       <Modal open={dialog === "help"} onClose={() => setDialog(null)} title="Keyboard shortcuts">
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
@@ -443,7 +457,7 @@ export function ReviewWorkspace({ connId, owner, repo, number }: { connId: strin
             ["u", "Reset focused finding to pending"],
             ["e", "Edit focused finding"],
             ["v", "Toggle file viewed"],
-            ["1 / 2 / 3", "Overview / Files / Findings"],
+            ["1 / 2 / 3 / 4", "Overview / Files / Findings / Ask"],
             ["+ on a line", "Comment (Shift+click to select a range)"],
             ["?", "This help"],
           ].map(([k, d]) => (
