@@ -15,7 +15,7 @@ export interface ChatOptions {
   maxTokens?: number;
 }
 
-/** One implementation per provider family; Phase 1 ships the OpenAI-compatible one. */
+/** One implementation per provider family (OpenAI-compatible, Azure OpenAI, Anthropic, Gemini). */
 export interface AiClient {
   chat(messages: ChatMessage[], opts?: ChatOptions): Promise<ChatResult>;
   listModels(): Promise<string[]>;

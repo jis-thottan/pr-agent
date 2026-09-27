@@ -1,6 +1,7 @@
 import { requireUser } from "@/server/auth/session";
 import { ConnectionsSection } from "./connections";
 import { ProvidersSection } from "./providers";
+import { ProfilesSection } from "./profiles";
 
 export default async function SettingsPage() {
   const user = await requireUser();
@@ -8,10 +9,11 @@ export default async function SettingsPage() {
     <main className="mx-auto w-full max-w-4xl space-y-6 p-6">
       <div>
         <h1 className="text-xl font-semibold">Settings</h1>
-        <p className="text-sm text-muted">Connect code hosts and configure the AI models used for reviews.</p>
+        <p className="text-sm text-muted">Connect code hosts, configure the AI models used for reviews, and save review profiles.</p>
       </div>
       <ConnectionsSection />
       <ProvidersSection isAdmin={user.role === "admin"} />
+      <ProfilesSection userId={user.id} isAdmin={user.role === "admin"} />
     </main>
   );
 }

@@ -1,7 +1,7 @@
 import "server-only";
 import { eq, sql } from "drizzle-orm";
 import { getDb, schema } from "../db";
-import type { AiProvider, Finding, ScmConnection } from "../db/schema";
+import type { AiProvider, AppliedRepoRules, Finding, ScmConnection, Severity } from "../db/schema";
 import { aiClientFor } from "../ai";
 import type { AiClient } from "../ai/types";
 import { providerFor } from "../scm";
@@ -11,6 +11,8 @@ import { createFileFilter } from "./filter";
 import { buildBatches, type ReviewFileInput } from "./chunk";
 import { parseFindings, parseSummary, type RawFinding } from "./parse";
 import { redactSecrets } from "./redact";
+import { instructionsForPaths, meetsSeverity, stricterSeverity, type RepoRules } from "./rules";
+import { loadRepoRules } from "./rules-loader";
 import { REVIEW_SYSTEM_PROMPT, SUMMARY_SYSTEM_PROMPT, reviewUserPrompt, summaryUserPrompt } from "./prompts";
 
 export interface ReviewOptions {
@@ -18,6 +20,11 @@ export interface ReviewOptions {
   extraIgnore?: string[];
   /** Fetch full file contents for small files so the model sees surrounding code. */
   fullFileContext?: boolean;
+  /** Drop findings below this severity. */
+  minSeverity?: Severity | null;
+  /** Read .pr-review.yml from the target branch and apply it (default true). */
+  repoRules?: boolean;
+  profileId?: string | null;
 }
 
 const CONCURRENCY = Math.max(1, Number(process.env.AI_CONCURRENCY ?? 2));
@@ -38,10 +45,10 @@ async function pool<T, R>(items: T[], limit: number, fn: (item: T, i: number) =>
   return results;
 }
 
-function budgetChars(provider: AiProvider) {
+function budgetChars(provider: AiProvider, instructionChars: number) {
   const outputReserve = Math.min(4096, Math.floor(provider.maxContextTokens * 0.25));
   const systemTokens = REVIEW_SYSTEM_PROMPT.length / CHARS_PER_TOKEN;
-  const promptOverhead = 1200; // title, description, instructions
+  const promptOverhead = 1200 + instructionChars / CHARS_PER_TOKEN; // title, description, instructions, repo rules
   const tokens = provider.maxContextTokens - outputReserve - systemTokens - promptOverhead;
   return Math.max(2000, Math.floor(tokens * CHARS_PER_TOKEN));
 }
@@ -54,7 +61,7 @@ function fallbackVerdict(fs: { severity: string }[]) {
 
 /**
  * Starts a review in the background and returns its id immediately.
- * Phase 1 runs in-process; Phase 3 moves this onto a durable job queue.
+ * Runs in-process for now; Phase 3 moves this onto a durable job queue.
  */
 export async function startReview(args: {
   userId: string;
@@ -81,6 +88,8 @@ export async function startReview(args: {
       providerId: args.provider.id,
       model: args.provider.model,
       instructions: args.options.instructions ?? null,
+      profileId: args.options.profileId ?? null,
+      minSeverity: args.options.minSeverity ?? null,
     })
     .returning({ id: schema.reviews.id });
 
@@ -103,8 +112,26 @@ async function runReview(
 ) {
   const db = await getDb();
   const ai = aiClientFor(provider);
-  const files = await scm.getFiles(pr.owner, pr.repo, pr.number);
-  const skip = createFileFilter(options.extraIgnore);
+  const [files, loadedRules] = await Promise.all([
+    scm.getFiles(pr.owner, pr.repo, pr.number),
+    options.repoRules === false ? null : loadRepoRules(scm, pr.owner, pr.repo, pr.baseSha),
+  ]);
+  const rules: RepoRules | null = loadedRules?.rules ?? null;
+  const minSeverity = stricterSeverity(options.minSeverity, rules?.minSeverity);
+  const fullFileContext = options.fullFileContext !== false && rules?.fullFileContext !== false;
+  if (loadedRules) {
+    const applied: AppliedRepoRules = {
+      path: loadedRules.path,
+      ref: loadedRules.ref,
+      instructions: rules?.instructions ?? null,
+      ignore: rules?.ignore ?? [],
+      minSeverity: rules?.minSeverity ?? null,
+      pathInstructions: rules?.pathInstructions ?? [],
+      warnings: loadedRules.warnings,
+    };
+    await db.update(schema.reviews).set({ repoRules: applied, minSeverity }).where(eq(schema.reviews.id, reviewId));
+  }
+  const skip = createFileFilter([...(options.extraIgnore ?? []), ...(rules?.ignore ?? [])]);
   const reviewable: ScmFile[] = files.filter((f) => !skip(f));
   const skipped = files.filter((f) => skip(f)).map((f) => f.path);
 
@@ -113,7 +140,7 @@ async function runReview(
 
   const inputs: ReviewFileInput[] = await pool(reviewable, 4, async (f) => {
     let content: string | null = null;
-    if (options.fullFileContext !== false) {
+    if (fullFileContext) {
       content = await scm.getFileContent(pr.owner, pr.repo, f.path, pr.headSha).catch(() => null);
       if (content && content.length > MAX_CONTEXT_FILE_CHARS) content = null;
     }
@@ -126,7 +153,11 @@ async function runReview(
     };
   });
 
-  const batches = buildBatches(inputs, budgetChars(provider));
+  const instructionChars =
+    (options.instructions?.length ?? 0) +
+    (rules?.instructions?.length ?? 0) +
+    (rules?.pathInstructions ?? []).reduce((n, r) => n + r.path.length + r.instructions.length + 20, 0);
+  const batches = buildBatches(inputs, budgetChars(provider, instructionChars));
   const total = batches.length + 1;
   await db
     .update(schema.reviews)
@@ -148,7 +179,10 @@ async function runReview(
   const allFindings: RawFinding[] = [];
   await pool(batches, CONCURRENCY, async (batch) => {
     try {
-      const found = await reviewBatch(ai, pr, batch.text, options.instructions);
+      const repoText = rules
+        ? [rules.instructions, instructionsForPaths(rules, batch.paths)].filter(Boolean).join("\n\n") || null
+        : null;
+      const found = await reviewBatch(ai, pr, batch.text, options.instructions, repoText);
       await addTokens(found.promptTokens, found.completionTokens);
       allFindings.push(...found.findings.filter((f) => batch.paths.includes(resolvePath(f.file, batch.paths))));
     } catch (err) {
@@ -166,7 +200,7 @@ async function runReview(
   }
 
   const rows = dedupe(
-    allFindings.map((f) => {
+    allFindings.filter((f) => meetsSeverity(f.severity, minSeverity)).map((f) => {
       const path = resolvePath(f.file, reviewable.map((r) => r.path));
       const lines = commentable.get(path) ?? new Set<number>();
       const line = f.line ? snapToCommentable(f.line, lines) : null;
@@ -205,7 +239,7 @@ async function runReview(
           summaryUserPrompt({
             title: pr.title,
             description: pr.body,
-            instructions: options.instructions,
+            instructions: [rules?.instructions, options.instructions].filter(Boolean).join("\n\n") || null,
             files: files.map((f) => ({ path: f.path, status: f.status, additions: f.additions, deletions: f.deletions })),
             findings: rows.map((r) => ({ path: r.path, line: r.line, severity: r.severity, title: r.title })),
           }),
@@ -236,10 +270,16 @@ async function runReview(
     .where(eq(schema.reviews.id, reviewId));
 }
 
-async function reviewBatch(ai: AiClient, pr: ScmPullDetail, diff: string, instructions?: string | null) {
+async function reviewBatch(
+  ai: AiClient,
+  pr: ScmPullDetail,
+  diff: string,
+  instructions: string | null | undefined,
+  repoRules: string | null,
+) {
   const messages = [
     { role: "system" as const, content: REVIEW_SYSTEM_PROMPT },
-    { role: "user" as const, content: reviewUserPrompt({ title: pr.title, description: pr.body, instructions, diff }) },
+    { role: "user" as const, content: reviewUserPrompt({ title: pr.title, description: pr.body, instructions, repoRules, diff }) },
   ];
   let res = await ai.chat(messages, { json: true, maxTokens: 4096 });
   let promptTokens = res.promptTokens;

@@ -7,7 +7,7 @@ import { prParams, type PrCtx } from "@/server/pr";
 /** Everything the review workspace needs for one PR. */
 export const GET = route<PrCtx>(async (_req, { user, params }) => {
   const { connId, owner, repo, number, prKey } = await prParams(params);
-  const { scm } = await getConnection(user.id, connId);
+  const { conn, scm } = await getConnection(user.id, connId);
   const db = await getDb();
   const [pr, files, viewed, reviews] = await Promise.all([
     scm.getPull(owner, repo, number),
@@ -44,5 +44,5 @@ export const GET = route<PrCtx>(async (_req, { user, params }) => {
       .orderBy(desc(schema.reviews.createdAt))
       .limit(20),
   ]);
-  return { pr, files, viewed, reviews };
+  return { pr, files, viewed, reviews, host: conn.provider };
 });

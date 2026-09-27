@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { api } from "@/lib/api";
 import { useApi, type Connection } from "@/lib/hooks";
+import { HOST_LABEL } from "@/lib/hosts";
 import { Badge, Button, Card, Empty, ErrorNote, Field, Input, Modal, Select, Spinner, timeAgo } from "@/components/ui";
 
 export function ConnectionsSection() {
@@ -18,12 +19,12 @@ export function ConnectionsSection() {
       {loading && !data ? (
         <div className="p-6 text-center"><Spinner /></div>
       ) : !data?.connections.length ? (
-        <Empty title="No connections yet">Add a GitHub personal access token to browse repositories and review pull requests. You can add several accounts.</Empty>
+        <Empty title="No connections yet">Add a GitHub or Azure DevOps personal access token to browse repositories and review pull requests. You can add several accounts.</Empty>
       ) : (
         <ul className="divide-y divide-border">
           {data.connections.map((c) => (
             <li key={c.id} className="flex items-center gap-3 px-4 py-3">
-              <Badge tone="muted">{c.provider === "github" ? "GitHub" : "Azure DevOps"}</Badge>
+              <Badge tone="muted">{HOST_LABEL[c.provider]}</Badge>
               <div className="min-w-0 flex-1">
                 <div className="font-medium">{c.name}</div>
                 <div className="truncate text-xs text-muted">
@@ -51,7 +52,7 @@ export function ConnectionsSection() {
 }
 
 function AddConnection({ open, onClose, onAdded }: { open: boolean; onClose: () => void; onAdded: () => void }) {
-  const [provider, setProvider] = useState("github");
+  const [provider, setProvider] = useState<"github" | "azure_devops">("github");
   const [enterprise, setEnterprise] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,7 +63,8 @@ function AddConnection({ open, onClose, onAdded }: { open: boolean; onClose: () 
     setBusy(true);
     setError(null);
     try {
-      await api("/api/connections", { body: { provider: "github", name: f.name, token: f.token, baseUrl: enterprise ? f.baseUrl : "" } });
+      const baseUrl = provider === "azure_devops" ? f.baseUrl : enterprise ? f.baseUrl : "";
+      await api("/api/connections", { body: { provider, name: f.name, token: f.token, baseUrl } });
       onAdded();
     } catch (err) {
       setError((err as Error).message);
@@ -75,28 +77,44 @@ function AddConnection({ open, onClose, onAdded }: { open: boolean; onClose: () 
     <Modal open={open} onClose={onClose} title="Add code host connection">
       <form id="add-conn" onSubmit={submit} className="space-y-4">
         <Field label="Provider">
-          <Select value={provider} onChange={(e) => setProvider(e.target.value)}>
+          <Select value={provider} onChange={(e) => setProvider(e.target.value as typeof provider)}>
             <option value="github">GitHub</option>
-            <option value="azure_devops" disabled>Azure DevOps (Phase 2)</option>
+            <option value="azure_devops">Azure DevOps</option>
           </Select>
         </Field>
         <Field label="Display name">
-          <Input name="name" required placeholder="e.g. Work GitHub" />
+          <Input name="name" required placeholder={provider === "github" ? "e.g. Work GitHub" : "e.g. Contoso Azure DevOps"} />
         </Field>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={enterprise} onChange={(e) => setEnterprise(e.target.checked)} /> GitHub Enterprise Server
-        </label>
-        {enterprise && (
-          <Field label="API base URL" hint="Usually https://github.your-company.com/api/v3">
-            <Input name="baseUrl" type="url" required placeholder="https://github.example.com/api/v3" />
-          </Field>
+        {provider === "github" ? (
+          <>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={enterprise} onChange={(e) => setEnterprise(e.target.checked)} /> GitHub Enterprise Server
+            </label>
+            {enterprise && (
+              <Field label="API base URL" hint="Usually https://github.your-company.com/api/v3">
+                <Input name="baseUrl" type="url" required placeholder="https://github.example.com/api/v3" />
+              </Field>
+            )}
+            <Field
+              label="Personal access token"
+              hint={<>Fine-grained token with <b>Pull requests: read & write</b>, <b>Contents: read</b> and <b>Metadata: read</b> on the repos you review (or a classic token with <code>repo</code>). Stored encrypted.</>}
+            >
+              <Input name="token" type="password" required autoComplete="off" placeholder="github_pat_…" />
+            </Field>
+          </>
+        ) : (
+          <>
+            <Field label="Organization URL" hint={<>For example <code>https://dev.azure.com/contoso</code>. For Azure DevOps Server, use the collection URL, such as <code>https://tfs.example.com/tfs/DefaultCollection</code>.</>}>
+              <Input name="baseUrl" type="url" required placeholder="https://dev.azure.com/your-org" />
+            </Field>
+            <Field
+              label="Personal access token"
+              hint={<>Scopes: <b>Code: Read & write</b> (read diffs, post comments, vote) and <b>Project and Team: Read</b> (for the inbox). Stored encrypted.</>}
+            >
+              <Input name="token" type="password" required autoComplete="off" />
+            </Field>
+          </>
         )}
-        <Field
-          label="Personal access token"
-          hint={<>Fine-grained token with <b>Pull requests: read & write</b>, <b>Contents: read</b> and <b>Metadata: read</b> on the repos you review (or a classic token with <code>repo</code>). Stored encrypted.</>}
-        >
-          <Input name="token" type="password" required autoComplete="off" placeholder="github_pat_…" />
-        </Field>
         <ErrorNote error={error} />
       </form>
       <div className="mt-4 flex justify-end gap-2">

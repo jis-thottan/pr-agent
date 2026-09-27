@@ -28,10 +28,10 @@ export default function InboxPage() {
         <Card title="Get started">
           <ol className="space-y-3 p-4 text-sm">
             <Step done={!noAi} n={1} title="Add an AI provider">
-              A local model (Ollama, LM Studio, vLLM) or any OpenAI-compatible cloud endpoint. Admins do this in <Link className="text-accent" href="/settings">Settings</Link>.
+              A local model (Ollama, LM Studio, vLLM), any OpenAI-compatible endpoint, or Anthropic, Gemini or Azure OpenAI. Admins do this in <Link className="text-accent" href="/settings">Settings</Link>.
             </Step>
-            <Step done={!noConn} n={2} title="Connect GitHub">
-              Add a personal access token in <Link className="text-accent" href="/settings">Settings</Link>. Add more than one if you work across accounts or Enterprise servers.
+            <Step done={!noConn} n={2} title="Connect GitHub or Azure DevOps">
+              Add a personal access token in <Link className="text-accent" href="/settings">Settings</Link>. Add more than one if you work across accounts, organizations or Enterprise servers.
             </Step>
             <Step done={false} n={3} title="Open a pull request and run the AI review">
               Then accept, edit or dismiss each finding and post the review back to the PR.

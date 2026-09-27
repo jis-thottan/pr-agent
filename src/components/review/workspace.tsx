@@ -13,9 +13,10 @@ import { RunDialog, type RunOptions } from "./run-dialog";
 import { SubmitDialog } from "./submit-dialog";
 import { Overview } from "./overview";
 import { FindingsList } from "./findings-list";
+import { HOST_LABEL, type HostType } from "@/lib/hosts";
 import type { DraftComment, Finding, FindingPatch, PrDetail, PrFile, Review, ReviewListItem } from "./types";
 
-type PrData = { pr: PrDetail; files: PrFile[]; viewed: { path: string; sha: string }[]; reviews: ReviewListItem[] };
+type PrData = { pr: PrDetail; files: PrFile[]; viewed: { path: string; sha: string }[]; reviews: ReviewListItem[]; host: HostType };
 type Tab = "overview" | "files" | "findings";
 
 function readPref<T extends string>(key: string, fallback: T): T {
@@ -313,7 +314,7 @@ export function ReviewWorkspace({ connId, owner, repo, number }: { connId: strin
               <span className="font-mono text-ok">+{pr.additions}</span>
               <span className="font-mono text-danger">-{pr.deletions}</span>
               {pr.mergeable === false && <Badge tone="danger">merge conflicts</Badge>}
-              <a href={pr.url} target="_blank" rel="noreferrer" className="text-accent hover:underline">Open on GitHub ↗</a>
+              <a href={pr.url} target="_blank" rel="noreferrer" className="text-accent hover:underline">Open on {HOST_LABEL[prQ.data!.host]} ↗</a>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -427,11 +428,14 @@ export function ReviewWorkspace({ connId, owner, repo, number }: { connId: strin
         open={dialog === "run"}
         onClose={() => setDialog(null)}
         onRun={startReview}
-        repoKey={`${owner}/${repo}`}
+        connId={connId}
+        owner={owner}
+        repo={repo}
+        baseSha={pr.baseSha}
         stats={{ files: files.length, additions: pr.additions, deletions: pr.deletions }}
       />
       {review && (
-        <SubmitDialog open={dialog === "submit"} onClose={() => setDialog(null)} review={review} findings={findings} prMoved={Boolean(stale)} onSubmit={submitReview} />
+        <SubmitDialog host={prQ.data!.host} open={dialog === "submit"} onClose={() => setDialog(null)} review={review} findings={findings} prMoved={Boolean(stale)} onSubmit={submitReview} />
       )}
       <Modal open={dialog === "help"} onClose={() => setDialog(null)} title="Keyboard shortcuts">
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">

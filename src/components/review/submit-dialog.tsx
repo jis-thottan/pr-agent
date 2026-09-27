@@ -4,17 +4,26 @@ import { useEffect, useState } from "react";
 import clsx from "clsx";
 import { Button, ErrorNote, Modal, Textarea } from "../ui";
 import { Markdown } from "../markdown";
+import { HOST_LABEL, type HostType } from "@/lib/hosts";
 import type { Finding, Review } from "./types";
 
 type Event = "comment" | "approve" | "request_changes";
 
-const EVENTS: { value: Event; label: string; hint: string }[] = [
-  { value: "comment", label: "Comment", hint: "Post feedback without approving or blocking." },
-  { value: "approve", label: "Approve", hint: "Approve the changes." },
-  { value: "request_changes", label: "Request changes", hint: "The PR must be updated before it can merge." },
-];
+const EVENTS: Record<HostType, { value: Event; label: string; hint: string }[]> = {
+  github: [
+    { value: "comment", label: "Comment", hint: "Post feedback without approving or blocking." },
+    { value: "approve", label: "Approve", hint: "Approve the changes." },
+    { value: "request_changes", label: "Request changes", hint: "The PR must be updated before it can merge." },
+  ],
+  azure_devops: [
+    { value: "comment", label: "Comment", hint: "Post comment threads without changing your vote." },
+    { value: "approve", label: "Approve", hint: "Post the comments and vote Approve." },
+    { value: "request_changes", label: "Wait for author", hint: "Post the comments and vote Wait for author. The summary thread stays active." },
+  ],
+};
 
-export function SubmitDialog({ open, onClose, review, findings, prMoved, onSubmit }: {
+export function SubmitDialog({ host, open, onClose, review, findings, prMoved, onSubmit }: {
+  host: HostType;
   open: boolean;
   onClose: () => void;
   review: Review;
@@ -38,6 +47,8 @@ export function SubmitDialog({ open, onClose, review, findings, prMoved, onSubmi
     setError(null);
   }, [open, review.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const events = EVENTS[host];
+  const label = HOST_LABEL[host];
   const accepted = findings.filter((f) => f.state === "accepted");
   const inline = accepted.filter((f) => f.inDiff && f.line).length;
   const general = accepted.length - inline;
@@ -57,7 +68,7 @@ export function SubmitDialog({ open, onClose, review, findings, prMoved, onSubmi
 
   if (postedUrl) {
     return (
-      <Modal open={open} onClose={onClose} title="Review posted" footer={<><Button onClick={onClose}>Close</Button><a href={postedUrl} target="_blank" rel="noreferrer"><Button variant="primary">Open on GitHub ↗</Button></a></>}>
+      <Modal open={open} onClose={onClose} title="Review posted" footer={<><Button onClick={onClose}>Close</Button><a href={postedUrl} target="_blank" rel="noreferrer"><Button variant="primary">Open on {label} ↗</Button></a></>}>
         <p className="text-sm">Your review is on the pull request with {inline} inline comment{inline === 1 ? "" : "s"}.</p>
       </Modal>
     );
@@ -69,7 +80,7 @@ export function SubmitDialog({ open, onClose, review, findings, prMoved, onSubmi
       onClose={onClose}
       title="Submit review"
       wide
-      footer={<><Button onClick={onClose}>Cancel</Button><Button variant={event === "request_changes" ? "danger" : event === "approve" ? "success" : "primary"} onClick={submit} loading={busy}>Submit: {EVENTS.find((e) => e.value === event)?.label}</Button></>}
+      footer={<><Button onClick={onClose}>Cancel</Button><Button variant={event === "request_changes" ? "danger" : event === "approve" ? "success" : "primary"} onClick={submit} loading={busy}>Submit: {events.find((e) => e.value === event)?.label}</Button></>}
     >
       <div className="space-y-4">
         <div className="grid grid-cols-3 gap-2">
@@ -79,12 +90,12 @@ export function SubmitDialog({ open, onClose, review, findings, prMoved, onSubmi
         </div>
         {review.postedAt && (
           <p className="rounded-md border border-border bg-panel px-3 py-2 text-xs text-muted">
-            This review was already posted. Submitting again creates a new GitHub review that contains only the findings accepted since then.
+            This review was already posted. Submitting again posts a new {host === "github" ? "GitHub review" : "set of comment threads"} that contains only the findings accepted since then.
           </p>
         )}
         {prMoved && (
           <p className="rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn">
-            New commits were pushed after this review ran. Comments stay attached to the commit that was reviewed, and GitHub marks them outdated where the code changed.
+            New commits were pushed after this review ran. Comments stay attached to the {host === "github" ? "commit" : "iteration"} that was reviewed, and {label} marks them outdated where the code changed.
           </p>
         )}
         <div>
@@ -99,7 +110,7 @@ export function SubmitDialog({ open, onClose, review, findings, prMoved, onSubmi
           )}
         </div>
         <div className="space-y-1.5">
-          {EVENTS.map((e) => (
+          {events.map((e) => (
             <label key={e.value} className={clsx("flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 text-sm", event === e.value ? "border-accent bg-accent/5" : "border-border")}>
               <input type="radio" name="event" className="mt-1" checked={event === e.value} onChange={() => setEvent(e.value)} />
               <span><span className="font-medium">{e.label}</span><span className="block text-xs text-muted">{e.hint}</span></span>

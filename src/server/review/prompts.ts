@@ -22,11 +22,14 @@ export function reviewUserPrompt(opts: {
   title: string;
   description: string;
   instructions?: string | null;
+  /** From .pr-review.yml on the target branch, including path-scoped rules for this batch. */
+  repoRules?: string | null;
   diff: string;
 }) {
   return [
     `Pull request: ${opts.title}`,
     opts.description ? `Description:\n${opts.description.slice(0, 3000)}` : "",
+    opts.repoRules ? `Repository review rules (maintained by the team; follow these):\n${opts.repoRules}` : "",
     opts.instructions ? `Additional review instructions from the tech lead (follow these):\n${opts.instructions}` : "",
     `Changes to review:\n\n${opts.diff}`,
   ]

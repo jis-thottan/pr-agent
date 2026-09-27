@@ -96,7 +96,7 @@ export const DiffView = memo(function DiffView({ file, mode, findings, draft, fu
   if (!file.patch) {
     return (
       <div className="px-4 py-8 text-center text-sm text-muted">
-        {file.status === "removed" ? "This file was deleted." : "No text diff is available. The file is binary, renamed without changes, or too large for GitHub to show."}
+        {file.status === "removed" ? "This file was deleted." : "No text diff is available. The file is binary, renamed without changes, or too large to diff."}
       </div>
     );
   }

@@ -34,7 +34,7 @@ export default function ReposPage() {
     return (
       <main className="mx-auto max-w-3xl p-6">
         <Empty title="No connections" action={<Link href="/settings"><Button variant="primary">Add a connection</Button></Link>}>
-          Connect a GitHub account to see the repositories it can access.
+          Connect a GitHub or Azure DevOps account to see the repositories it can access.
         </Empty>
       </main>
     );

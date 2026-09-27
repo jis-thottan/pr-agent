@@ -46,11 +46,15 @@ export const scmConnections = pgTable(
   (t) => [index("scm_connections_user_idx").on(t.userId)],
 );
 
+export const AI_PROVIDER_TYPES = ["openai_compatible", "azure_openai", "anthropic", "gemini"] as const;
+
 export const aiProviders = pgTable("ai_providers", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
-  type: text("type", { enum: ["openai_compatible"] }).notNull().default("openai_compatible"),
+  type: text("type", { enum: AI_PROVIDER_TYPES }).notNull().default("openai_compatible"),
   baseUrl: text("base_url").notNull(),
+  // Azure OpenAI only: the api-version query parameter.
+  apiVersion: text("api_version"),
   encryptedApiKey: text("encrypted_api_key"),
   model: text("model").notNull(),
   temperature: real("temperature").notNull().default(0.1),
@@ -62,6 +66,52 @@ export const aiProviders = pgTable("ai_providers", {
 });
 
 export type ReviewProgress = { done: number; total: number; current?: string };
+
+export const SEVERITIES = ["critical", "major", "minor", "nit"] as const;
+export const CATEGORIES = [
+  "bug",
+  "security",
+  "performance",
+  "maintainability",
+  "style",
+  "tests",
+  "docs",
+] as const;
+export type Severity = (typeof SEVERITIES)[number];
+export type Category = (typeof CATEGORIES)[number];
+
+/** Saved run settings: a reviewer's own, or shared with everyone on the server. */
+export const reviewProfiles = pgTable(
+  "review_profiles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    shared: boolean("shared").notNull().default(false),
+    providerId: uuid("provider_id").references(() => aiProviders.id, { onDelete: "set null" }),
+    instructions: text("instructions"),
+    extraIgnore: jsonb("extra_ignore").$type<string[]>().notNull().default([]),
+    fullFileContext: boolean("full_file_context").notNull().default(true),
+    minSeverity: text("min_severity", { enum: SEVERITIES }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("review_profiles_user_idx").on(t.userId)],
+);
+
+/** What a review actually applied from the repository's .pr-review.yml (for the Overview tab). */
+export type AppliedRepoRules = {
+  path: string;
+  ref: string;
+  instructions: string | null;
+  ignore: string[];
+  minSeverity: Severity | null;
+  pathInstructions: { path: string; instructions: string }[];
+  warnings: string[];
+};
 
 export const reviews = pgTable(
   "reviews",
@@ -81,6 +131,9 @@ export const reviews = pgTable(
     providerId: uuid("provider_id").references(() => aiProviders.id, { onDelete: "set null" }),
     model: text("model").notNull(),
     instructions: text("instructions"),
+    profileId: uuid("profile_id").references(() => reviewProfiles.id, { onDelete: "set null" }),
+    minSeverity: text("min_severity", { enum: SEVERITIES }),
+    repoRules: jsonb("repo_rules").$type<AppliedRepoRules>(),
     status: text("status", { enum: ["running", "completed", "failed"] }).notNull().default("running"),
     progress: jsonb("progress").$type<ReviewProgress>().notNull().default({ done: 0, total: 0 }),
     summary: text("summary"),
@@ -97,19 +150,6 @@ export const reviews = pgTable(
   },
   (t) => [index("reviews_pr_idx").on(t.connectionId, t.owner, t.repo, t.prNumber)],
 );
-
-export const SEVERITIES = ["critical", "major", "minor", "nit"] as const;
-export const CATEGORIES = [
-  "bug",
-  "security",
-  "performance",
-  "maintainability",
-  "style",
-  "tests",
-  "docs",
-] as const;
-export type Severity = (typeof SEVERITIES)[number];
-export type Category = (typeof CATEGORIES)[number];
 
 export const findings = pgTable(
   "findings",
@@ -168,3 +208,4 @@ export type ScmConnection = typeof scmConnections.$inferSelect;
 export type AiProvider = typeof aiProviders.$inferSelect;
 export type Review = typeof reviews.$inferSelect;
 export type Finding = typeof findings.$inferSelect;
+export type ReviewProfile = typeof reviewProfiles.$inferSelect;

@@ -34,6 +34,9 @@ export type Review = {
   model: string;
   headSha: string;
   instructions: string | null;
+  profileId: string | null;
+  minSeverity: Severity | null;
+  repoRules: RepoRulesInfo | null;
   progress: { done: number; total: number; current?: string };
   summary: string | null;
   riskLevel: "low" | "medium" | "high" | null;
@@ -76,3 +79,13 @@ export const SEVERITY_TONE: Record<Severity, "danger" | "warn" | "accent" | "mut
 };
 
 export const SEVERITY_RANK: Record<Severity, number> = { critical: 0, major: 1, minor: 2, nit: 3 };
+
+export type RepoRulesInfo = {
+  path: string;
+  ref: string;
+  instructions: string | null;
+  ignore: string[];
+  minSeverity: Severity | null;
+  pathInstructions: { path: string; instructions: string }[];
+  warnings: string[];
+};

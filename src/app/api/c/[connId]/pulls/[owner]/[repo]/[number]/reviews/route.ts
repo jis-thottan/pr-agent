@@ -5,6 +5,8 @@ import { audit, HttpError, route } from "@/server/http";
 import { getConnection } from "@/server/scm";
 import { prParams, type PrCtx } from "@/server/pr";
 import { startReview } from "@/server/review/engine";
+import { getVisibleProfile } from "@/server/profiles";
+import { SEVERITIES } from "@/server/db/schema";
 
 const body = z.discriminatedUnion("mode", [
   z.object({
@@ -13,6 +15,10 @@ const body = z.discriminatedUnion("mode", [
     instructions: z.string().max(5000).optional(),
     extraIgnore: z.array(z.string().min(1)).max(50).optional(),
     fullFileContext: z.boolean().default(true),
+    minSeverity: z.enum(SEVERITIES).nullish(),
+    repoRules: z.boolean().default(true),
+    // Recorded on the review; the dialog sends the profile's settings (possibly tweaked) explicitly.
+    profileId: z.string().uuid().nullish(),
   }),
   // A review with no AI pass, for writing comments by hand.
   z.object({ mode: z.literal("manual") }),
@@ -45,6 +51,7 @@ export const POST = route<PrCtx>(async (req, { user, params }) => {
     return { id: row.id };
   }
 
+  if (input.profileId) await getVisibleProfile(user.id, input.profileId);
   const [provider] = await db.select().from(schema.aiProviders).where(eq(schema.aiProviders.id, input.providerId)).limit(1);
   if (!provider) throw new HttpError(404, "AI provider not found");
   const id = await startReview({
@@ -54,7 +61,14 @@ export const POST = route<PrCtx>(async (req, { user, params }) => {
     owner,
     repo,
     number,
-    options: { instructions: input.instructions, extraIgnore: input.extraIgnore, fullFileContext: input.fullFileContext },
+    options: {
+      instructions: input.instructions,
+      extraIgnore: input.extraIgnore,
+      fullFileContext: input.fullFileContext,
+      minSeverity: input.minSeverity ?? null,
+      repoRules: input.repoRules,
+      profileId: input.profileId ?? null,
+    },
   });
   await audit(user.id, "review.start", { id, pr: `${owner}/${repo}#${number}`, provider: provider.name, model: provider.model });
   return { id };

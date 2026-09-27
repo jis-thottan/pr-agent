@@ -4,6 +4,7 @@ import { getDb, schema } from "../db";
 import { decrypt } from "../crypto";
 import { HttpError } from "../http";
 import type { ScmConnection } from "../db/schema";
+import { AzureDevOpsProvider } from "./azure-devops";
 import { GitHubProvider } from "./github";
 import type { ScmProvider } from "./types";
 
@@ -13,7 +14,7 @@ export function providerFor(conn: Pick<ScmConnection, "provider" | "baseUrl" | "
     case "github":
       return new GitHubProvider(token, conn.baseUrl);
     case "azure_devops":
-      throw new HttpError(501, "Azure DevOps support arrives in Phase 2");
+      return new AzureDevOpsProvider(token, conn.baseUrl);
   }
 }
 

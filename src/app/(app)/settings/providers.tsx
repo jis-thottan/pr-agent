@@ -2,25 +2,44 @@
 
 import { useState } from "react";
 import { api } from "@/lib/api";
-import { useApi, type AiProviderInfo } from "@/lib/hooks";
+import { useApi, type AiProviderInfo, type AiProviderType } from "@/lib/hooks";
 import { Badge, Button, Card, Empty, ErrorNote, Field, Input, Modal, Select, Spinner } from "@/components/ui";
 
-type Preset = { label: string; baseUrl: string; model: string; isLocal: boolean; ctx: number; needsKey: boolean; note?: string };
+type Preset = {
+  label: string;
+  type: AiProviderType;
+  baseUrl: string;
+  model: string;
+  isLocal: boolean;
+  ctx: number;
+  needsKey: boolean;
+  apiVersion?: string;
+  note?: string;
+};
 
-// Everything here speaks the OpenAI Chat Completions protocol.
-const PRESETS: Preset[] = [
-  { label: "Ollama (docker compose)", baseUrl: "http://ollama:11434/v1", model: "qwen2.5-coder:14b", isLocal: true, ctx: 16000, needsKey: false, note: "Set OLLAMA_CONTEXT_LENGTH on the Ollama server to at least the context size below." },
-  { label: "Ollama (host machine)", baseUrl: "http://host.docker.internal:11434/v1", model: "qwen2.5-coder:14b", isLocal: true, ctx: 16000, needsKey: false },
-  { label: "LM Studio", baseUrl: "http://host.docker.internal:1234/v1", model: "", isLocal: true, ctx: 16000, needsKey: false },
-  { label: "vLLM / LocalAI / llama.cpp", baseUrl: "http://localhost:8000/v1", model: "", isLocal: true, ctx: 32000, needsKey: false },
-  { label: "OpenAI", baseUrl: "https://api.openai.com/v1", model: "", isLocal: false, ctx: 128000, needsKey: true },
-  { label: "Anthropic (OpenAI-compatible endpoint)", baseUrl: "https://api.anthropic.com/v1", model: "claude-sonnet-5", isLocal: false, ctx: 200000, needsKey: true, note: "Turn off JSON mode for this endpoint; the prompt already enforces JSON." },
-  { label: "Google Gemini (OpenAI-compatible endpoint)", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", model: "", isLocal: false, ctx: 200000, needsKey: true },
-  { label: "Azure OpenAI / AI Foundry (v1 API)", baseUrl: "https://YOUR-RESOURCE.openai.azure.com/openai/v1", model: "your-deployment-name", isLocal: false, ctx: 128000, needsKey: true },
-  { label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", model: "", isLocal: false, ctx: 128000, needsKey: true },
-  { label: "Groq", baseUrl: "https://api.groq.com/openai/v1", model: "", isLocal: false, ctx: 128000, needsKey: true },
-  { label: "Custom endpoint", baseUrl: "", model: "", isLocal: false, ctx: 16000, needsKey: false },
+const TYPES: { value: AiProviderType; label: string; baseUrlHint: string; placeholder: string }[] = [
+  { value: "openai_compatible", label: "OpenAI-compatible (Chat Completions)", baseUrlHint: "API root, usually ending in /v1", placeholder: "http://ollama:11434/v1" },
+  { value: "anthropic", label: "Anthropic (native Messages API)", baseUrlHint: "https://api.anthropic.com, or your gateway", placeholder: "https://api.anthropic.com" },
+  { value: "gemini", label: "Google Gemini (native API)", baseUrlHint: "https://generativelanguage.googleapis.com/v1beta", placeholder: "https://generativelanguage.googleapis.com/v1beta" },
+  { value: "azure_openai", label: "Azure OpenAI (deployments API)", baseUrlHint: "Resource endpoint, e.g. https://NAME.openai.azure.com", placeholder: "https://your-resource.openai.azure.com" },
 ];
+
+const PRESETS: Preset[] = [
+  { label: "Ollama (docker compose)", type: "openai_compatible", baseUrl: "http://ollama:11434/v1", model: "qwen2.5-coder:14b", isLocal: true, ctx: 16000, needsKey: false, note: "Set OLLAMA_CONTEXT_LENGTH on the Ollama server to at least the context size below." },
+  { label: "Ollama (host machine)", type: "openai_compatible", baseUrl: "http://host.docker.internal:11434/v1", model: "qwen2.5-coder:14b", isLocal: true, ctx: 16000, needsKey: false },
+  { label: "LM Studio", type: "openai_compatible", baseUrl: "http://host.docker.internal:1234/v1", model: "", isLocal: true, ctx: 16000, needsKey: false },
+  { label: "vLLM / LocalAI / llama.cpp", type: "openai_compatible", baseUrl: "http://localhost:8000/v1", model: "", isLocal: true, ctx: 32000, needsKey: false },
+  { label: "OpenAI", type: "openai_compatible", baseUrl: "https://api.openai.com/v1", model: "", isLocal: false, ctx: 128000, needsKey: true },
+  { label: "Anthropic Claude", type: "anthropic", baseUrl: "https://api.anthropic.com", model: "claude-opus-5", isLocal: false, ctx: 200000, needsKey: true, note: "Uses the native Messages API. Temperature isn't sent because current Claude models choose their own sampling." },
+  { label: "Google Gemini", type: "gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta", model: "", isLocal: false, ctx: 200000, needsKey: true, note: "Uses a Google AI Studio API key. Click Fetch to list the models your key can use." },
+  { label: "Azure OpenAI (deployments)", type: "azure_openai", baseUrl: "https://YOUR-RESOURCE.openai.azure.com", model: "your-deployment-name", apiVersion: "2024-10-21", isLocal: false, ctx: 128000, needsKey: true, note: "Model is the deployment name from the Azure portal. Uses the api-key header." },
+  { label: "Azure AI Foundry (OpenAI v1 API)", type: "openai_compatible", baseUrl: "https://YOUR-RESOURCE.openai.azure.com/openai/v1", model: "your-deployment-name", isLocal: false, ctx: 128000, needsKey: true },
+  { label: "OpenRouter", type: "openai_compatible", baseUrl: "https://openrouter.ai/api/v1", model: "", isLocal: false, ctx: 128000, needsKey: true },
+  { label: "Groq", type: "openai_compatible", baseUrl: "https://api.groq.com/openai/v1", model: "", isLocal: false, ctx: 128000, needsKey: true },
+  { label: "Custom endpoint", type: "openai_compatible", baseUrl: "", model: "", isLocal: false, ctx: 16000, needsKey: false },
+];
+
+const TYPE_BADGE: Record<AiProviderType, string | null> = { openai_compatible: null, anthropic: "Anthropic", gemini: "Gemini", azure_openai: "Azure OpenAI" };
 
 export function ProvidersSection({ isAdmin }: { isAdmin: boolean }) {
   const { data, loading, error, reload } = useApi<{ providers: AiProviderInfo[] }>("/api/ai-providers");
@@ -33,7 +52,7 @@ export function ProvidersSection({ isAdmin }: { isAdmin: boolean }) {
         <div className="p-6 text-center"><Spinner /></div>
       ) : !data?.providers.length ? (
         <Empty title="No AI providers configured">
-          {isAdmin ? "Add a local model (Ollama, LM Studio, vLLM) or a cloud provider. Any OpenAI-compatible endpoint works." : "Ask an admin to add an AI provider."}
+          {isAdmin ? "Add a local model (Ollama, LM Studio, vLLM), any OpenAI-compatible endpoint, or Anthropic, Gemini and Azure OpenAI through their native APIs." : "Ask an admin to add an AI provider."}
         </Empty>
       ) : (
         <ul className="divide-y divide-border">
@@ -43,6 +62,7 @@ export function ProvidersSection({ isAdmin }: { isAdmin: boolean }) {
                 <div className="flex items-center gap-2 font-medium">
                   {p.name}
                   {p.isDefault && <Badge tone="accent">default</Badge>}
+                  {TYPE_BADGE[p.type] && <Badge tone="muted">{TYPE_BADGE[p.type]}</Badge>}
                   {p.isLocal ? <Badge tone="ok">local</Badge> : <Badge tone="warn">cloud</Badge>}
                 </div>
                 <div className="truncate font-mono text-xs text-muted">
@@ -86,7 +106,9 @@ export function ProvidersSection({ isAdmin }: { isAdmin: boolean }) {
 function ProviderForm({ existing, onClose, onSaved }: { existing: AiProviderInfo | null; onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState({
     name: existing?.name ?? "",
+    type: existing?.type ?? ("openai_compatible" as AiProviderType),
     baseUrl: existing?.baseUrl ?? "",
+    apiVersion: existing?.apiVersion ?? "",
     apiKey: "",
     model: existing?.model ?? "",
     temperature: existing?.temperature ?? 0.1,
@@ -101,6 +123,7 @@ function ProviderForm({ existing, onClose, onSaved }: { existing: AiProviderInfo
   const [error, setError] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<string | null>(null);
 
+  const typeInfo = TYPES.find((t) => t.value === form.type) ?? TYPES[0];
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   // Leaving the key blank while editing keeps the stored one.
@@ -116,11 +139,13 @@ function ProviderForm({ existing, onClose, onSaved }: { existing: AiProviderInfo
     setForm((f) => ({
       ...f,
       name: f.name || p.label.replace(/ \(.*\)$/, ""),
+      type: p.type,
       baseUrl: p.baseUrl,
+      apiVersion: p.apiVersion ?? "",
       model: p.model || f.model,
       isLocal: p.isLocal,
       maxContextTokens: p.ctx,
-      jsonMode: !p.label.startsWith("Anthropic"),
+      jsonMode: true,
     }));
     setNote(p.note ?? (p.needsKey ? "This provider requires an API key." : null));
   }
@@ -180,30 +205,46 @@ function ProviderForm({ existing, onClose, onSaved }: { existing: AiProviderInfo
         <Field label="Name">
           <Input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Local Qwen Coder" />
         </Field>
-        <Field label="Base URL" hint="OpenAI-compatible API root (ends in /v1 for most servers)">
-          <Input value={form.baseUrl} onChange={(e) => set("baseUrl", e.target.value)} placeholder="http://ollama:11434/v1" className="font-mono" />
+        <Field label="API type">
+          <Select value={form.type} onChange={(e) => set("type", e.target.value as AiProviderType)}>
+            {TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+          </Select>
         </Field>
+        <Field label="Base URL" hint={typeInfo.baseUrlHint}>
+          <Input value={form.baseUrl} onChange={(e) => set("baseUrl", e.target.value)} placeholder={typeInfo.placeholder} className="font-mono" />
+        </Field>
+        {form.type === "azure_openai" && (
+          <Field label="API version" hint="The api-version query parameter">
+            <Input value={form.apiVersion} onChange={(e) => set("apiVersion", e.target.value)} placeholder="2024-10-21" className="font-mono" />
+          </Field>
+        )}
         <Field label="API key" hint={existing?.hasApiKey ? "Leave blank to keep the saved key" : "Optional for local servers"}>
           <Input type="password" value={form.apiKey} onChange={(e) => set("apiKey", e.target.value)} autoComplete="off" placeholder={existing?.hasApiKey ? "••••••••" : ""} />
         </Field>
-        <Field label="Model">
+        <Field label={form.type === "azure_openai" ? "Deployment name" : "Model"}>
           <div className="flex gap-2">
             <Input value={form.model} onChange={(e) => set("model", e.target.value)} list="model-options" className="font-mono" placeholder="model id" />
-            <Button onClick={() => run("models")} loading={busy === "models"} disabled={!form.baseUrl}>Fetch</Button>
+            {form.type !== "azure_openai" && <Button onClick={() => run("models")} loading={busy === "models"} disabled={!form.baseUrl}>Fetch</Button>}
             <datalist id="model-options">{models.map((m) => <option key={m} value={m} />)}</datalist>
           </div>
         </Field>
         <Field label="Context window (tokens)" hint="Diffs are split into batches that fit this size">
           <Input type="number" min={2000} value={form.maxContextTokens} onChange={(e) => set("maxContextTokens", Number(e.target.value))} />
         </Field>
-        <Field label="Temperature" hint="Low values give steadier reviews">
-          <Input type="number" min={0} max={2} step={0.05} value={form.temperature} onChange={(e) => set("temperature", Number(e.target.value))} />
+        <Field label="Temperature" hint={form.type === "anthropic" ? "Not sent to Claude models" : "Low values give steadier reviews"}>
+          <Input type="number" min={0} max={2} step={0.05} value={form.temperature} disabled={form.type === "anthropic"} onChange={(e) => set("temperature", Number(e.target.value))} />
         </Field>
         <div className="space-y-2 sm:col-span-2">
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={form.jsonMode} onChange={(e) => set("jsonMode", e.target.checked)} />
-            Request JSON mode (<code className="text-xs">response_format: json_object</code>). Disable if the server rejects it.
-          </label>
+          {form.type !== "anthropic" && (
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={form.jsonMode} onChange={(e) => set("jsonMode", e.target.checked)} />
+              {form.type === "gemini" ? (
+                <>Request JSON output (<code className="text-xs">responseMimeType: application/json</code>)</>
+              ) : (
+                <>Request JSON mode (<code className="text-xs">response_format: json_object</code>). Disable if the server rejects it.</>
+              )}
+            </label>
+          )}
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={form.isLocal} onChange={(e) => set("isLocal", e.target.checked)} />
             Runs inside our network. When this is off, secrets are masked before code is sent.
