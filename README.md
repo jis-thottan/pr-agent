@@ -7,6 +7,7 @@ A self-hosted web app for tech leads to review pull requests with AI. The AI dra
 - Save your review settings as **profiles**, and keep team-wide rules in a **`.pr-review.yml`** file in the repository.
 - Get **automatic draft reviews** from webhooks when PRs are opened or updated. After a push, only the changed files are re-reviewed.
 - **Ask questions about a PR** in a chat grounded in its diff and findings, and keep spending in check with per-provider and per-user **budgets**.
+- Run it for a team: **single sign-on** (Microsoft Entra ID, Google, GitHub, any OIDC provider), **roles**, a **team dashboard**, an **audit log**, and app-based connections (**GitHub App**, **Microsoft sign-in for Azure DevOps**) instead of personal tokens.
 - Accept, edit or dismiss each finding, add your own line comments and suggestions, then post one grouped review (inline comments, a summary, and Approve / Comment / Request changes) back to the PR.
 
 > Supported code hosts: GitHub (github.com and Enterprise Server) and Azure DevOps (Services and Server). See the [Roadmap](#roadmap) for what's next.
@@ -51,6 +52,8 @@ docker compose exec ollama ollama pull qwen2.5-coder:14b
 3. Open a PR from **Inbox** (PRs where your review is requested) or **Repositories**, then click **✦ Run AI review**.
 
 ## Token permissions
+
+Personal access tokens are the quickest way to connect. For teams, see [Code host apps](#code-host-apps-github-app-and-microsoft-sign-in), which avoid long-lived personal tokens.
 
 ### GitHub
 
@@ -181,6 +184,62 @@ Give each AI provider an input and output price (USD per million tokens) to trac
 
 Before a review starts, its cost is estimated from the batches it will send, and it's refused if that would exceed a budget. Each model call is also checked, so a long review or chat stops once the cap is reached. A blocked request returns HTTP 402 with the amounts involved.
 
+## Users, roles and single sign-on
+
+The first account is the admin. Admins manage everyone under **Settings → Administration**.
+
+| Role | Can |
+|---|---|
+| Admin | Everything: users and roles, SSO, code host apps, AI providers, budgets |
+| Lead | Everything a reviewer can, plus the team dashboard, the audit log, and sharing or editing shared profiles |
+| Reviewer | Run AI reviews, chat about PRs, post reviews, set up automatic reviews (default for new users) |
+| Viewer | Read-only: browse PRs and read reviews. Can't run AI or post. |
+
+Every API route checks the caller's role, and the UI hides what the role can't use. There must always be at least one active admin. Deactivating a user signs them out everywhere.
+
+**Single sign-on.** Under **Single sign-on → Add sign-in provider**:
+
+| Provider | What to enter |
+|---|---|
+| Microsoft Entra ID | Tenant ID or primary domain, application (client) ID, client secret |
+| Google | OAuth client ID and secret |
+| OpenID Connect | Issuer URL (discovery is read from `/.well-known/openid-configuration`), client ID and secret |
+| GitHub | OAuth app client ID and secret; the Enterprise Server URL if you don't use github.com |
+
+After saving, register the redirect URI it shows (`…/api/auth/sso/<id>/callback`) with the provider.
+
+- Sign-in uses the authorization code flow with PKCE, plus `state` and a nonce. The ID token's issuer, audience, expiry and nonce are all checked.
+- **Allowed email domains** restrict who can sign in. Accounts are matched by **verified** email and linked the first time someone signs in. **Create an account the first time someone signs in** adds new users with the role you choose.
+- Turning off **Allow email and password sign-in for everyone** leaves password sign-in to admins only, so you can't lock yourself out. The login page then shows SSO buttons, with a small *Admin sign-in with password* link.
+- Set `PUBLIC_URL` so redirect URIs match the address people use, and `COOKIE_SECURE=true` behind HTTPS.
+
+## Code host apps (GitHub App and Microsoft sign-in)
+
+Admins register apps under **Settings → Administration → Code host apps**. People then choose **Add connection → Connect with an app**.
+
+**GitHub App.** Create a GitHub App with **Pull requests: Read & write**, **Contents: Read** and **Metadata: Read**. Set both its *Callback URL* and *Setup URL* to the callback URL shown in the app list, and tick *Request user authorization (OAuth) during installation*. Then enter the App ID, URL name (slug), client ID and secret, and a private key.
+- Tokens are short-lived installation tokens (1 hour), minted with the app's private key. No personal token is stored.
+- Reviews are posted by the app's bot account.
+- When someone connects, the app checks with their own GitHub authorization which installations they can access, and adds a connection for each. Only repositories the app is installed on are listed. The inbox shows PRs where that person's review is requested.
+
+**Azure DevOps with Microsoft sign-in.** Register an app in Entra ID with a *Web* redirect URI (the callback shown in the list) and the delegated **Azure DevOps → user_impersonation** permission. Enter the tenant, client ID and secret.
+- Each person signs in with Microsoft and enters their organization URL. They get a connection with their own Azure DevOps access.
+- The refresh token is stored encrypted and rotated on every refresh. Access tokens live in memory only.
+
+## Team dashboard and audit log
+
+**Dashboard** (leads and admins) covers the last 7, 30 or 90 days:
+- AI reviews, split into automatic and incremental
+- reviews posted to the PR
+- the acceptance rate of AI findings (accepted or posted, out of all findings someone decided on)
+- the median time from a finished review to posting it
+- AI spend, reviews per day, and findings by severity
+- tables per repository and per reviewer
+
+Findings carried over by incremental reviews are counted once.
+
+**Audit log** (leads and admins) lists sign-ins (including failed SSO attempts), user and role changes, SSO and app changes, connections, providers, profiles, automatic review rules, budgets, and started and posted reviews. You can filter by action or action group and search the details or email.
+
 ## The review workspace
 
 - File tree with change stats, a marker for the most severe finding, a filter, "with findings", "hide viewed", and viewed tracking. A file becomes unviewed again when it changes.
@@ -214,7 +273,7 @@ Before a review starts, its cost is estimated from the batches it will send, and
 | `JOB_CONCURRENCY` | `2` | Reviews each server process runs at once |
 | `JOB_WORKER` | on | Set to `off` to stop this process from running background jobs |
 | `JOB_STALE_AFTER_MS` | `120000` | How long a job can go without a heartbeat before it's retried |
-| `PUBLIC_URL` | – | Base URL that code hosts use for webhooks |
+| `PUBLIC_URL` | – | Base URL for webhooks, SSO redirect URIs and code host app callbacks |
 | `HTTPS_PROXY`, `NO_PROXY` | – | Outbound proxy (the image sets `NODE_USE_ENV_PROXY=1`) |
 | `NODE_EXTRA_CA_CERTS` | – | Path to a corporate root CA bundle mounted into the container |
 
@@ -227,7 +286,10 @@ The database migrates itself on startup. `GET /api/healthz` is used by the conta
 - Sessions use random tokens stored as SHA-256 hashes, in an HttpOnly, SameSite=Lax cookie.
 - Mutating API calls require an `X-Requested-With` header as CSRF protection.
 - Before code is sent to non-local providers, the app masks common secrets: private keys, AWS, GitHub, OpenAI/Anthropic, Slack and Google keys, JWTs, connection-string passwords and `password=` literals. This is best-effort. Use a local model for sensitive repositories.
-- An audit log records sign-ins, connection and provider changes, started reviews and posted reviews, in the `audit_log` table.
+- An audit log records sign-ins, user, role, SSO and app changes, connection and provider changes, and started and posted reviews. Leads and admins can browse it under **Audit log**.
+- Roles are enforced on every API route. Viewers can't run AI or post reviews.
+- SSO uses the authorization code flow with PKCE, state and a nonce. ID-token claims are validated, and accounts are linked only by verified email.
+- GitHub App connections use 1-hour installation tokens. Entra refresh tokens are encrypted and rotated. OAuth state cookies are encrypted, short-lived and scoped to their callback path.
 - Posted reviews carry a footer saying they were AI-assisted and verified by you. You can turn it off for each review.
 - Repository rules are read from the target branch, never from the PR being reviewed.
 
@@ -256,6 +318,9 @@ src/
     webhooks/             GitHub / Azure DevOps event parsing, signature checks, automatic reviews
     chat/                 "Ask about this PR" context building
     usage.ts              usage ledger, cost and budget checks
+    auth/                 sessions, SSO (OIDC / GitHub OAuth), ID-token checks, auth settings
+    dashboard/            team metrics aggregation
+  lib/permissions.ts      role → permission map shared by the API and the UI
     db/                   Drizzle schema and client (Postgres or PGlite)
 drizzle/                  SQL migrations
 ```
@@ -269,5 +334,5 @@ drizzle/                  SQL migrations
 |---|---|
 | 1 ✓ | Docker image, local accounts, multiple GitHub/GHES connections, any OpenAI-compatible model, diff workspace, AI review, accept/edit/dismiss, manual comments and suggestions, posting reviews, secret masking, audit log |
 | 2 ✓ | Azure DevOps (PAT; threads and reviewer votes), native Anthropic, Azure OpenAI and Gemini adapters, saved review profiles, repo rules file (`.pr-review.yml`) |
-| **3 ✓ (this release)** | Durable job queue and webhooks for automatic draft reviews, incremental review of new commits only, "ask about this PR" chat, cost budgets |
-| 4 | OIDC SSO (Entra ID / GitHub / Google), roles, audit log UI, team dashboard, GitHub App and Entra OAuth |
+| 3 ✓ | Durable job queue and webhooks for automatic draft reviews, incremental review of new commits only, "ask about this PR" chat, cost budgets |
+| **4 ✓ (this release)** | OIDC SSO (Entra ID / GitHub / Google), roles, audit log UI, team dashboard, GitHub App and Entra OAuth |

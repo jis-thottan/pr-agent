@@ -15,7 +15,7 @@ export const PATCH = route<Ctx>(async (req, { user, params }) => {
   const db = await getDb();
   await db.update(schema.autoReviewRules).set(input).where(eq(schema.autoReviewRules.id, id));
   await audit(user.id, "auto_review.update", { id, enabled: input.enabled });
-});
+}, { perm: "autoReview" });
 
 export const DELETE = route<Ctx>(async (_req, { user, params }) => {
   const { id } = await params;
@@ -23,4 +23,4 @@ export const DELETE = route<Ctx>(async (_req, { user, params }) => {
   const db = await getDb();
   await db.delete(schema.autoReviewRules).where(eq(schema.autoReviewRules.id, id));
   await audit(user.id, "auto_review.delete", { id });
-});
+}, { perm: "autoReview" });

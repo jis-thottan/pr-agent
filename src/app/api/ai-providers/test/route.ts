@@ -23,5 +23,5 @@ export const POST = route(
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
   },
-  { admin: true },
+  { perm: "manageProviders" },
 );

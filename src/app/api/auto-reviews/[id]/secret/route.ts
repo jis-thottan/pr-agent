@@ -11,7 +11,7 @@ export const GET = route<Ctx>(async (_req, { user, params }) => {
   const { id } = await params;
   const rule = await getOwnedRule(user, id);
   return { secret: decrypt(rule.encryptedSecret) };
-});
+}, { perm: "autoReview" });
 
 /** Rotates the secret; the code host must be updated with the new one. */
 export const POST = route<Ctx>(async (_req, { user, params }) => {
@@ -22,4 +22,4 @@ export const POST = route<Ctx>(async (_req, { user, params }) => {
   await db.update(schema.autoReviewRules).set({ encryptedSecret: encrypt(secret) }).where(eq(schema.autoReviewRules.id, id));
   await audit(user.id, "auto_review.rotate_secret", { id });
   return { secret };
-});
+}, { perm: "autoReview" });

@@ -12,6 +12,7 @@ export const GET = route(async (_req, { user }) => {
     .select({
       id: schema.scmConnections.id,
       provider: schema.scmConnections.provider,
+      authType: schema.scmConnections.authType,
       name: schema.scmConnections.name,
       baseUrl: schema.scmConnections.baseUrl,
       accountLogin: schema.scmConnections.accountLogin,
@@ -64,4 +65,4 @@ export const POST = route(async (req, { user }) => {
     .returning({ id: schema.scmConnections.id });
   await audit(user.id, "connection.create", { id: row.id, provider: input.provider, login });
   return { id: row.id, accountLogin: login };
-});
+}, { perm: "read" });

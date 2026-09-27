@@ -2,6 +2,7 @@ import { and, asc, eq, gte, sql } from "drizzle-orm";
 import { getDb, schema } from "@/server/db";
 import { route } from "@/server/http";
 import { getBudgetSettings, monthStart } from "@/server/usage";
+import { can } from "@/lib/permissions";
 
 /** Month-to-date spend: the caller's own, per provider (with budgets), and per user for admins. */
 export const GET = route(async (_req, { user }) => {
@@ -44,7 +45,7 @@ export const GET = route(async (_req, { user }) => {
     .orderBy(asc(schema.aiProviders.name));
 
   const users =
-    user.role === "admin"
+    can(user.role, "manageBudgets")
       ? (
           await db
             .select({ userId: schema.users.id, name: schema.users.name, email: schema.users.email, ...sums })

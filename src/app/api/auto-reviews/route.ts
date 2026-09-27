@@ -33,4 +33,4 @@ export const POST = route(async (req, { user }) => {
   if (!row) throw new HttpError(409, `Automatic reviews are already set up for ${input.owner}/${input.repo} on this connection`);
   await audit(user.id, "auto_review.create", { id: row.id, repo: `${input.owner}/${input.repo}` });
   return { id: row.id, secret, webhookUrl: `${publicBaseUrl(req)}/api/webhooks/${row.id}` };
-});
+}, { perm: "autoReview" });

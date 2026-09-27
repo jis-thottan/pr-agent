@@ -10,5 +10,5 @@ export const PUT = route(
     await setBudgetSettings(input);
     await audit(user.id, "budget.update", input);
   },
-  { admin: true },
+  { perm: "manageBudgets" },
 );

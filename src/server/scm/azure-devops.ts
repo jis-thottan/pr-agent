@@ -104,15 +104,22 @@ async function pool<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>
 
 export class AzureDevOpsProvider implements ScmProvider {
   private base: string;
-  private auth: string;
+  private authHeader: () => Promise<string>;
   private cacheScope: string;
   private viewer?: Promise<ScmViewer & { id: string }>;
 
-  constructor(token: string, baseUrl: string) {
+  /** `pat`: personal access token (Basic auth). `bearer`: Entra OAuth access tokens, scoped by connection id. */
+  constructor(auth: { pat: string } | { bearer: () => Promise<string>; scope: string }, baseUrl: string) {
     this.base = baseUrl.replace(/\/+$/, "");
-    this.auth = "Basic " + Buffer.from(":" + token).toString("base64");
-    // Cache entries are per token, so one user's access never serves another's.
-    this.cacheScope = sha256(this.base + token).slice(0, 16);
+    if ("pat" in auth) {
+      const header = "Basic " + Buffer.from(":" + auth.pat).toString("base64");
+      this.authHeader = async () => header;
+      // Cache entries are per credential, so one user's access never serves another's.
+      this.cacheScope = sha256(this.base + auth.pat).slice(0, 16);
+    } else {
+      this.authHeader = async () => `Bearer ${await auth.bearer()}`;
+      this.cacheScope = sha256(this.base + "conn:" + auth.scope).slice(0, 16);
+    }
   }
 
   private repoApi(project: string, repo: string) {
@@ -130,7 +137,7 @@ export class AzureDevOpsProvider implements ScmProvider {
       const res = await fetch(u, {
         method: init.method ?? "GET",
         headers: {
-          authorization: this.auth,
+          authorization: await this.authHeader(),
           accept: init.raw ? "application/octet-stream" : "application/json",
           ...(init.body !== undefined ? { "content-type": "application/json" } : {}),
         },
@@ -140,7 +147,7 @@ export class AzureDevOpsProvider implements ScmProvider {
       });
       // An invalid or expired PAT gets a 203 / redirect to an HTML sign-in page instead of a 401.
       if (res.status === 203 || (res.status >= 300 && res.status < 400)) {
-        throw new AdoError(401, "Azure DevOps rejected the personal access token (expired, revoked or missing scopes)");
+        throw new AdoError(401, "Azure DevOps rejected the credentials (expired or revoked token, or missing scopes)");
       }
       if (res.ok) return res;
       if ((res.status === 429 || res.status === 503) && attempt < 2) {

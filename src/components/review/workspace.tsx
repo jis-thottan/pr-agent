@@ -17,7 +17,7 @@ import { ChatPanel } from "./chat-panel";
 import { HOST_LABEL, type HostType } from "@/lib/hosts";
 import type { DraftComment, Finding, FindingPatch, PrDetail, PrFile, Review, ReviewListItem } from "./types";
 
-type PrData = { pr: PrDetail; files: PrFile[]; viewed: { path: string; sha: string }[]; reviews: ReviewListItem[]; host: HostType };
+type PrData = { pr: PrDetail; files: PrFile[]; viewed: { path: string; sha: string }[]; reviews: ReviewListItem[]; host: HostType; canReview: boolean; canPost: boolean };
 type Tab = "overview" | "files" | "findings" | "chat";
 
 function readPref<T extends string>(key: string, fallback: T): T {
@@ -333,13 +333,13 @@ export function ReviewWorkspace({ connId, owner, repo, number }: { connId: strin
                 ))}
               </Select>
             )}
-            <Button onClick={() => setDialog("run")} disabled={running}>{running ? <><Spinner className="h-3.5 w-3.5" /> {review?.status === "queued" ? "Queued…" : "Reviewing…"}</> : "✦ Run AI review"}</Button>
+            {prQ.data!.canReview && <Button onClick={() => setDialog("run")} disabled={running}>{running ? <><Spinner className="h-3.5 w-3.5" /> {review?.status === "queued" ? "Queued…" : "Reviewing…"}</> : "✦ Run AI review"}</Button>}
             {review?.postedUrl && (
               <a href={review.postedUrl} target="_blank" rel="noreferrer" className="whitespace-nowrap text-xs text-ok hover:underline" title={`Posted ${timeAgo(review.postedAt)}`}>✓ Posted ↗</a>
             )}
-            <Button variant="primary" onClick={() => setDialog("submit")} disabled={!review || running}>
+            {prQ.data!.canPost && <Button variant="primary" onClick={() => setDialog("submit")} disabled={!review || running}>
               Submit review{acceptedCount > 0 && <span className="rounded-full bg-accent-fg/20 px-1.5 text-xs">{acceptedCount}</span>}
-            </Button>
+            </Button>}
             <button className="text-muted hover:text-fg" onClick={() => setDialog("help")} title="Keyboard shortcuts (?)"><Kbd>?</Kbd></button>
           </div>
         </div>

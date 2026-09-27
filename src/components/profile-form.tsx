@@ -28,8 +28,10 @@ export function parseGlobs(s: string) {
 }
 
 /** Create or edit a review profile. `initial` pre-fills a new profile (e.g. from the run dialog). */
-export function ProfileForm({ existing, initial, onClose, onSaved }: {
+export function ProfileForm({ existing, initial, canShare = false, onClose, onSaved }: {
   existing?: ReviewProfileInfo | null;
+  /** Leads and admins may share profiles with everyone. */
+  canShare?: boolean;
   initial?: Partial<ProfileDraft>;
   onClose: () => void;
   onSaved: (id: string) => void;
@@ -110,10 +112,12 @@ export function ProfileForm({ existing, initial, onClose, onSaved }: {
             <input type="checkbox" checked={form.fullFileContext} onChange={(e) => set("fullFileContext", e.target.checked)} />
             Send the full file for context when it fits
           </label>
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={form.shared} onChange={(e) => set("shared", e.target.checked)} />
-            Share with everyone on this server (only you and admins can change it)
-          </label>
+          {(canShare || form.shared) && (
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={form.shared} disabled={!canShare} onChange={(e) => set("shared", e.target.checked)} />
+              Share with everyone on this server (only you, leads and admins can change it)
+            </label>
+          )}
         </div>
       </div>
       <div className="mt-4"><ErrorNote error={error} /></div>

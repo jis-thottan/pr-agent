@@ -1,12 +1,13 @@
 import { getDb, schema } from "@/server/db";
 import { audit, route } from "@/server/http";
-import { assertProviderExists, listVisibleProfiles, profileInput } from "@/server/profiles";
+import { assertCanShare, assertProviderExists, listVisibleProfiles, profileInput } from "@/server/profiles";
 
 export const GET = route(async (_req, { user }) => ({ profiles: await listVisibleProfiles(user.id) }));
 
 export const POST = route(async (req, { user }) => {
   const input = profileInput.parse(await req.json());
   await assertProviderExists(input.providerId);
+  assertCanShare(user, input.shared);
   const db = await getDb();
   const [{ id }] = await db
     .insert(schema.reviewProfiles)

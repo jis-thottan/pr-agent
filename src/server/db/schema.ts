@@ -11,12 +11,72 @@ import {
   index,
 } from "drizzle-orm/pg-core";
 
+export const ROLES = ["admin", "lead", "reviewer", "viewer"] as const;
+export type Role = (typeof ROLES)[number];
+
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   email: text("email").notNull().unique(),
   name: text("name").notNull(),
-  passwordHash: text("password_hash").notNull(),
-  role: text("role", { enum: ["admin", "reviewer"] }).notNull().default("reviewer"),
+  // Null for accounts that only sign in with SSO.
+  passwordHash: text("password_hash"),
+  role: text("role", { enum: ROLES }).notNull().default("reviewer"),
+  disabledAt: timestamp("disabled_at", { withTimezone: true }),
+  lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Sign-in providers configured by admins (Entra ID, Google, generic OIDC, GitHub OAuth). */
+export const ssoProviders = pgTable("sso_providers", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  kind: text("kind", { enum: ["entra", "google", "oidc", "github"] }).notNull(),
+  name: text("name").notNull(),
+  // OIDC issuer URL; for GitHub the web base URL (https://github.com or a GHES host).
+  issuer: text("issuer").notNull(),
+  clientId: text("client_id").notNull(),
+  encryptedClientSecret: text("encrypted_client_secret").notNull(),
+  enabled: boolean("enabled").notNull().default(true),
+  // Lower-case email domains allowed to sign in; empty = any verified email.
+  allowedDomains: jsonb("allowed_domains").$type<string[]>().notNull().default([]),
+  autoCreateUsers: boolean("auto_create_users").notNull().default(true),
+  defaultRole: text("default_role", { enum: ROLES }).notNull().default("reviewer"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const userIdentities = pgTable(
+  "user_identities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    providerId: uuid("provider_id")
+      .notNull()
+      .references(() => ssoProviders.id, { onDelete: "cascade" }),
+    subject: text("subject").notNull(),
+    email: text("email"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("user_identities_uq").on(t.providerId, t.subject), index("user_identities_user_idx").on(t.userId)],
+);
+
+/**
+ * Server-wide app registrations used to connect code hosts without personal tokens:
+ * a GitHub App (installation tokens) or an Entra ID app for Azure DevOps OAuth.
+ */
+export const codeHostApps = pgTable("code_host_apps", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  kind: text("kind", { enum: ["github_app", "entra_devops"] }).notNull(),
+  name: text("name").notNull(),
+  // GitHub: API base URL (https://api.github.com or https://host/api/v3). Entra: tenant ID or "organizations".
+  baseUrl: text("base_url").notNull(),
+  // GitHub web URL for install links (https://github.com or the GHES host).
+  webUrl: text("web_url"),
+  appId: text("app_id"),
+  slug: text("slug"),
+  clientId: text("client_id").notNull(),
+  encryptedClientSecret: text("encrypted_client_secret").notNull(),
+  encryptedPrivateKey: text("encrypted_private_key"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -37,6 +97,11 @@ export const scmConnections = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     provider: text("provider", { enum: ["github", "azure_devops"] }).notNull(),
+    // pat: encryptedToken is a personal access token. github_app: installationId + appId.
+    // entra_oauth: encryptedToken is an Entra refresh token for Azure DevOps.
+    authType: text("auth_type", { enum: ["pat", "github_app", "entra_oauth"] }).notNull().default("pat"),
+    appId: uuid("app_id").references(() => codeHostApps.id, { onDelete: "cascade" }),
+    installationId: text("installation_id"),
     name: text("name").notNull(),
     baseUrl: text("base_url").notNull(),
     encryptedToken: text("encrypted_token").notNull(),
@@ -327,3 +392,5 @@ export type Finding = typeof findings.$inferSelect;
 export type ReviewProfile = typeof reviewProfiles.$inferSelect;
 export type Job = typeof jobs.$inferSelect;
 export type AutoReviewRule = typeof autoReviewRules.$inferSelect;
+export type SsoProvider = typeof ssoProviders.$inferSelect;
+export type CodeHostApp = typeof codeHostApps.$inferSelect;

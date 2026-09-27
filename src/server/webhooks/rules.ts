@@ -4,14 +4,7 @@ import { z } from "zod";
 import { getDb, schema } from "../db";
 import { HttpError } from "../http";
 import type { SessionUser } from "../auth/session";
-
-/** Base URL that code hosts should call: PUBLIC_URL, or the address this request came in on. */
-export function publicBaseUrl(req: Request) {
-  if (process.env.PUBLIC_URL) return process.env.PUBLIC_URL.replace(/\/+$/, "");
-  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
-  const proto = req.headers.get("x-forwarded-proto") ?? new URL(req.url).protocol.replace(":", "");
-  return host ? `${proto}://${host}` : new URL(req.url).origin;
-}
+export { publicBaseUrl } from "../url";
 
 export async function listRules(userId: string) {
   const db = await getDb();

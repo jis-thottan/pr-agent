@@ -38,6 +38,7 @@ export function useApi<T>(path: string | null) {
 export type Connection = {
   id: string;
   provider: "github" | "azure_devops";
+  authType?: "pat" | "github_app" | "entra_oauth";
   name: string;
   baseUrl: string;
   accountLogin: string | null;

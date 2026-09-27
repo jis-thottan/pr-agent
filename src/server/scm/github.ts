@@ -44,23 +44,53 @@ function toSummary(owner: string, repo: string, p: PullListItem | Pull): ScmPull
 
 export class GitHubProvider implements ScmProvider {
   private octokit: Octokit;
+  /** Set for GitHub App connections: the token belongs to the installation, not a person. */
+  private installation: { reviewerLogin: string | null } | null;
 
-  constructor(token: string, baseUrl: string = GITHUB_DEFAULT_API) {
+  /** `token` is a PAT, or an async getter for GitHub App installation tokens. */
+  constructor(token: string | (() => Promise<string>), baseUrl: string = GITHUB_DEFAULT_API, opts: { installation?: { reviewerLogin: string | null } } = {}) {
+    this.installation = opts.installation ?? null;
     this.octokit = new Octokit({
-      auth: token,
+      auth: typeof token === "string" ? token : undefined,
       baseUrl: baseUrl.replace(/\/+$/, ""),
       userAgent: "pull-request-ai",
       request: { timeout: 30_000 },
     });
+    if (typeof token !== "string") {
+      this.octokit.hook.before("request", async (options) => {
+        options.headers.authorization = `token ${await token()}`;
+      });
+    }
   }
 
   async getViewer(): Promise<ScmViewer> {
+    if (this.installation) {
+      return { login: this.installation.reviewerLogin ?? "github-app", name: null, avatarUrl: null };
+    }
     const { data } = await this.octokit.users.getAuthenticated();
     return { login: data.login, name: data.name ?? null, avatarUrl: data.avatar_url ?? null };
   }
 
   async listRepos(): Promise<ScmRepo[]> {
     const repos: ScmRepo[] = [];
+    if (this.installation) {
+      for await (const { data } of this.octokit.paginate.iterator(this.octokit.apps.listReposAccessibleToInstallation, { per_page: 100 })) {
+        for (const r of data) {
+          repos.push({
+            owner: r.owner.login,
+            name: r.name,
+            fullName: r.full_name,
+            private: r.private,
+            description: r.description ?? null,
+            defaultBranch: r.default_branch,
+            updatedAt: r.pushed_at ?? r.updated_at ?? null,
+            url: r.html_url,
+          });
+        }
+        if (repos.length >= MAX_REPOS) break;
+      }
+      return repos.sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
+    }
     for await (const { data } of this.octokit.paginate.iterator(this.octokit.repos.listForAuthenticatedUser, {
       per_page: 100,
       sort: "updated",
@@ -97,7 +127,8 @@ export class GitHubProvider implements ScmProvider {
 
   async listReviewRequests(): Promise<ScmPullSummary[]> {
     const { data } = await this.octokit.request("GET /search/issues", {
-      q: "is:pr is:open archived:false review-requested:@me",
+      // An installation token has no "@me"; use the login of the person who connected the app.
+      q: `is:pr is:open archived:false review-requested:${this.installation ? (this.installation.reviewerLogin ?? "none") : "@me"}`,
       sort: "updated",
       order: "desc",
       per_page: 50,

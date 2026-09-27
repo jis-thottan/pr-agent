@@ -1,6 +1,6 @@
 {
   "name": "pull-request-ai",
-  "version": "0.3.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Self-hosted AI-assisted pull request review for GitHub and Azure DevOps.",
   "scripts": {

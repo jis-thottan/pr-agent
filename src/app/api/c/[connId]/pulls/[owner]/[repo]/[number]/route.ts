@@ -3,6 +3,7 @@ import { getDb, schema } from "@/server/db";
 import { route } from "@/server/http";
 import { getConnection } from "@/server/scm";
 import { prParams, type PrCtx } from "@/server/pr";
+import { can } from "@/lib/permissions";
 
 /** Everything the review workspace needs for one PR. */
 export const GET = route<PrCtx>(async (_req, { user, params }) => {
@@ -44,5 +45,5 @@ export const GET = route<PrCtx>(async (_req, { user, params }) => {
       .orderBy(desc(schema.reviews.createdAt))
       .limit(20),
   ]);
-  return { pr, files, viewed, reviews, host: conn.provider };
+  return { pr, files, viewed, reviews, host: conn.provider, canReview: can(user.role, "review"), canPost: can(user.role, "post") };
 });

@@ -5,6 +5,7 @@ import { getDb, schema } from "../db";
 import { HttpError } from "../http";
 import { SEVERITIES } from "../db/schema";
 import type { SessionUser } from "../auth/session";
+import { can } from "@/lib/permissions";
 
 export const profileInput = z.object({
   name: z.string().trim().min(1).max(100),
@@ -52,11 +53,17 @@ export async function getVisibleProfile(userId: string, id: string) {
   return row;
 }
 
-/** Owners edit their own profiles; admins can also edit or delete shared ones. */
+/** Owners edit their own profiles; leads and admins can also edit or delete shared ones. */
 export async function getEditableProfile(user: SessionUser, id: string) {
   const row = await getVisibleProfile(user.id, id);
-  if (row.userId !== user.id && user.role !== "admin") throw new HttpError(403, "Only the owner or an admin can change this profile");
+  if (row.userId !== user.id && !can(user.role, "shareProfiles")) {
+    throw new HttpError(403, "Only the owner, a lead or an admin can change this profile");
+  }
   return row;
+}
+
+export function assertCanShare(user: SessionUser, shared: boolean) {
+  if (shared && !can(user.role, "shareProfiles")) throw new HttpError(403, "Only leads and admins can share profiles with everyone");
 }
 
 export async function assertProviderExists(providerId: string | null) {

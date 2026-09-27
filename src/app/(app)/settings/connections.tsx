@@ -5,8 +5,11 @@ import { api } from "@/lib/api";
 import { useApi, type Connection } from "@/lib/hooks";
 import { HOST_LABEL } from "@/lib/hosts";
 import { Badge, Button, Card, Empty, ErrorNote, Field, Input, Modal, Select, Spinner, timeAgo } from "@/components/ui";
+import { AppConnectOptions, type CodeHostAppInfo } from "./code-host-apps";
 
-export function ConnectionsSection() {
+const AUTH_LABEL = { pat: null, github_app: "GitHub App", entra_oauth: "Microsoft sign-in" } as const;
+
+export function ConnectionsSection({ connectError, connected }: { connectError?: string | null; connected?: number | null }) {
   const { data, loading, error, reload } = useApi<{ connections: Connection[] }>("/api/connections");
   const [open, setOpen] = useState(false);
 
@@ -15,7 +18,11 @@ export function ConnectionsSection() {
       title="Code host connections"
       actions={<Button size="sm" variant="primary" onClick={() => setOpen(true)}>Add connection</Button>}
     >
-      <ErrorNote error={error} />
+      <ErrorNote error={error ?? connectError} />
+      {connected != null && connected > 0 && (
+        <p className="border-b border-border bg-ok/10 px-4 py-2 text-sm text-ok">Added {connected} connection{connected === 1 ? "" : "s"}.</p>
+      )}
+      {connected === 0 && <p className="border-b border-border px-4 py-2 text-sm text-muted">Those installations were already connected.</p>}
       {loading && !data ? (
         <div className="p-6 text-center"><Spinner /></div>
       ) : !data?.connections.length ? (
@@ -25,6 +32,7 @@ export function ConnectionsSection() {
           {data.connections.map((c) => (
             <li key={c.id} className="flex items-center gap-3 px-4 py-3">
               <Badge tone="muted">{HOST_LABEL[c.provider]}</Badge>
+              {AUTH_LABEL[c.authType ?? "pat"] && <Badge tone="accent">{AUTH_LABEL[c.authType ?? "pat"]}</Badge>}
               <div className="min-w-0 flex-1">
                 <div className="font-medium">{c.name}</div>
                 <div className="truncate text-xs text-muted">
@@ -53,6 +61,9 @@ export function ConnectionsSection() {
 
 function AddConnection({ open, onClose, onAdded }: { open: boolean; onClose: () => void; onAdded: () => void }) {
   const [provider, setProvider] = useState<"github" | "azure_devops">("github");
+  const [method, setMethod] = useState<"token" | "app">("token");
+  const apps = useApi<{ apps: CodeHostAppInfo[] }>(open ? "/api/code-host-apps" : null);
+  const hasApps = Boolean(apps.data?.apps.length);
   const [enterprise, setEnterprise] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -75,6 +86,18 @@ function AddConnection({ open, onClose, onAdded }: { open: boolean; onClose: () 
 
   return (
     <Modal open={open} onClose={onClose} title="Add code host connection">
+      {hasApps && (
+        <div className="mb-4 flex rounded-md border border-border text-sm">
+          {(["token", "app"] as const).map((m) => (
+            <button key={m} type="button" onClick={() => setMethod(m)} className={`flex-1 px-3 py-1.5 first:rounded-l-md last:rounded-r-md ${method === m ? "bg-panel-2 font-medium" : "text-muted hover:text-fg"}`}>
+              {m === "token" ? "Personal access token" : "Connect with an app"}
+            </button>
+          ))}
+        </div>
+      )}
+      {hasApps && method === "app" ? (
+        <AppConnectOptions apps={apps.data!.apps} />
+      ) : (
       <form id="add-conn" onSubmit={submit} className="space-y-4">
         <Field label="Provider">
           <Select value={provider} onChange={(e) => setProvider(e.target.value as typeof provider)}>
@@ -117,9 +140,10 @@ function AddConnection({ open, onClose, onAdded }: { open: boolean; onClose: () 
         )}
         <ErrorNote error={error} />
       </form>
+      )}
       <div className="mt-4 flex justify-end gap-2">
         <Button type="button" onClick={onClose}>Cancel</Button>
-        <Button type="submit" form="add-conn" variant="primary" loading={busy}>Verify & save</Button>
+        {!(hasApps && method === "app") && <Button type="submit" form="add-conn" variant="primary" loading={busy}>Verify & save</Button>}
       </div>
     </Modal>
   );

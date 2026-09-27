@@ -21,5 +21,5 @@ export const POST = route(
     await audit(user.id, "ai_provider.create", { id, name: input.name, model: input.model });
     return { id };
   },
-  { admin: true },
+  { perm: "manageProviders" },
 );

@@ -6,7 +6,7 @@ import { useApi, type AiProviderInfo, type ReviewProfileInfo } from "@/lib/hooks
 import { ProfileForm } from "@/components/profile-form";
 import { Badge, Button, Card, Empty, ErrorNote, Spinner } from "@/components/ui";
 
-export function ProfilesSection({ userId, isAdmin }: { userId: string; isAdmin: boolean }) {
+export function ProfilesSection({ userId, canShare }: { userId: string; canShare: boolean }) {
   const { data, loading, error, reload } = useApi<{ profiles: ReviewProfileInfo[] }>("/api/profiles");
   const providers = useApi<{ providers: AiProviderInfo[] }>("/api/ai-providers");
   const [editing, setEditing] = useState<ReviewProfileInfo | "new" | null>(null);
@@ -24,7 +24,7 @@ export function ProfilesSection({ userId, isAdmin }: { userId: string; isAdmin: 
       ) : (
         <ul className="divide-y divide-border">
           {data.profiles.map((p) => {
-            const canEdit = p.userId === userId || isAdmin;
+            const canEdit = p.userId === userId || canShare;
             return (
               <li key={p.id} className="flex items-center gap-3 px-4 py-3">
                 <div className="min-w-0 flex-1">
@@ -61,6 +61,7 @@ export function ProfilesSection({ userId, isAdmin }: { userId: string; isAdmin: 
       )}
       {editing && (
         <ProfileForm
+          canShare={canShare}
           existing={editing === "new" ? null : editing}
           onClose={() => setEditing(null)}
           onSaved={() => {

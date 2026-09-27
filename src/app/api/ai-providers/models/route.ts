@@ -15,5 +15,5 @@ export const POST = route(
       return { models: [], error: err instanceof Error ? err.message : String(err) };
     }
   },
-  { admin: true },
+  { perm: "manageProviders" },
 );
