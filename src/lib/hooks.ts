@@ -59,6 +59,9 @@ export type AiProviderInfo = {
   isLocal: boolean;
   isDefault: boolean;
   hasApiKey: boolean;
+  inputCostPerMTok: number | null;
+  outputCostPerMTok: number | null;
+  monthlyBudgetUsd: number | null;
 };
 
 export type Severity = "critical" | "major" | "minor" | "nit";

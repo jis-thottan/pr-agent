@@ -27,7 +27,17 @@ export function Overview({ pr, review, findings, onRun }: { pr: PrDetail; review
           }
         >
           <div className="space-y-3 p-4">
+            {review.status === "queued" && <p className="text-sm text-muted">Queued: {review.progress.current ?? "waiting for a worker"}.</p>}
+            {review.status === "queued" && review.error && <p className="text-xs text-warn">{review.error}</p>}
             {review.status === "running" && <p className="text-sm text-muted">Review in progress: {review.progress.current ?? "starting"} ({review.progress.done}/{review.progress.total || "?"})</p>}
+            {(review.trigger === "webhook" || review.baseReviewId) && (
+              <div className="flex flex-wrap gap-2 text-xs">
+                {review.trigger === "webhook" && <Badge tone="accent">automatic draft</Badge>}
+                {review.baseReviewId && (
+                  <Badge tone="muted">incremental · {review.unchangedFiles.length} unchanged file{review.unchangedFiles.length === 1 ? "" : "s"} carried over</Badge>
+                )}
+              </div>
+            )}
             {review.status === "failed" && <ErrorNote error={review.error} />}
             {review.summary && <Markdown>{review.summary}</Markdown>}
             {review.status === "completed" && (
@@ -35,6 +45,7 @@ export function Overview({ pr, review, findings, onRun }: { pr: PrDetail; review
                 {counts.map(({ s, n }) => <Badge key={s} tone={n ? SEVERITY_TONE[s] : "muted"}>{n} {s}</Badge>)}
                 <span className="ml-auto font-mono">
                   {review.model} · {(review.promptTokens + review.completionTokens).toLocaleString()} tokens ({review.promptTokens.toLocaleString()} in / {review.completionTokens.toLocaleString()} out)
+                  {review.costUsd > 0 && <> · ${review.costUsd < 0.01 ? review.costUsd.toFixed(4) : review.costUsd.toFixed(2)}</>}
                 </span>
               </div>
             )}

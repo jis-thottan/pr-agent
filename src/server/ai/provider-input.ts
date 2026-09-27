@@ -20,6 +20,10 @@ export const providerInput = z.object({
   jsonMode: z.boolean().default(true),
   isLocal: z.boolean().default(false),
   isDefault: z.boolean().default(false),
+  // USD per million tokens and a monthly cap; empty means not priced / unlimited.
+  inputCostPerMTok: z.coerce.number().min(0).max(10_000).nullish().transform((v) => v ?? null),
+  outputCostPerMTok: z.coerce.number().min(0).max(10_000).nullish().transform((v) => v ?? null),
+  monthlyBudgetUsd: z.coerce.number().min(0).max(10_000_000).nullish().transform((v) => v ?? null),
 });
 
 export type ProviderInput = z.infer<typeof providerInput>;

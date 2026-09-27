@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { useApi, type AiProviderInfo, type ReviewProfileInfo, type Severity } from "@/lib/hooks";
 import { MIN_SEVERITY_OPTIONS, ProfileForm, parseGlobs } from "../profile-form";
-import { Badge, Button, ErrorNote, Field, Input, Modal, Select, Textarea } from "../ui";
-import type { RepoRulesInfo } from "./types";
+import { Badge, Button, ErrorNote, Field, Input, Modal, Select, Textarea, timeAgo } from "../ui";
+import type { RepoRulesInfo, ReviewListItem } from "./types";
 
 export type RunOptions = {
   providerId: string;
@@ -14,6 +14,8 @@ export type RunOptions = {
   minSeverity: Severity | null;
   repoRules: boolean;
   profileId: string | null;
+  incremental: boolean;
+  baseReviewId: string | null;
 };
 
 type LoadedRules = { path: string; ref: string; rules: Omit<RepoRulesInfo, "path" | "ref" | "warnings"> | null; warnings: string[] } | null;
@@ -25,7 +27,7 @@ const FOCUS_PRESETS = [
   { label: "Strict", text: "Hold this PR to a high bar: flag missing tests for new logic, unclear naming, missing error handling, and any API contract changes." },
 ];
 
-export function RunDialog({ open, onClose, onRun, connId, owner, repo, baseSha, stats }: {
+export function RunDialog({ open, onClose, onRun, connId, owner, repo, baseSha, headSha, previousReview, stats }: {
   open: boolean;
   onClose: () => void;
   onRun: (o: RunOptions) => Promise<void>;
@@ -33,6 +35,9 @@ export function RunDialog({ open, onClose, onRun, connId, owner, repo, baseSha, 
   owner: string;
   repo: string;
   baseSha: string;
+  headSha: string;
+  /** Newest completed AI review at an older commit, if any. */
+  previousReview: ReviewListItem | null;
   stats: { files: number; additions: number; deletions: number };
 }) {
   const providers = useApi<{ providers: AiProviderInfo[] }>(open ? "/api/ai-providers" : null);
@@ -45,6 +50,7 @@ export function RunDialog({ open, onClose, onRun, connId, owner, repo, baseSha, 
   const [fullFileContext, setFullFileContext] = useState(true);
   const [minSeverity, setMinSeverity] = useState<Severity | null>(null);
   const [applyRepoRules, setApplyRepoRules] = useState(true);
+  const [incremental, setIncremental] = useState(true);
   const [savingProfile, setSavingProfile] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -104,6 +110,8 @@ export function RunDialog({ open, onClose, onRun, connId, owner, repo, baseSha, 
         minSeverity,
         repoRules: applyRepoRules,
         profileId,
+        incremental: Boolean(previousReview && incremental),
+        baseReviewId: previousReview && incremental ? previousReview.id : null,
       });
     } catch (err) {
       setError((err as Error).message);
@@ -170,6 +178,18 @@ export function RunDialog({ open, onClose, onRun, connId, owner, repo, baseSha, 
             </Select>
           </Field>
         </div>
+        {previousReview && (
+          <label className="flex items-start gap-2 text-sm">
+            <input type="checkbox" className="mt-1" checked={incremental} onChange={(e) => setIncremental(e.target.checked)} />
+            <span>
+              Only review files changed since the last review
+              <span className="block text-xs text-muted">
+                The review from {timeAgo(previousReview.createdAt)} covered <code>{previousReview.headSha.slice(0, 7)}</code>; the PR is now at <code>{headSha.slice(0, 7)}</code>.
+                Findings on unchanged files are carried over with their accept/dismiss state.
+              </span>
+            </span>
+          </label>
+        )}
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={fullFileContext} onChange={(e) => setFullFileContext(e.target.checked)} />
           Send the full file for context when it fits (better reviews, more tokens)

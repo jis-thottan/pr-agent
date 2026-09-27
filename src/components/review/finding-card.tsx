@@ -75,6 +75,7 @@ export function FindingCard({
               <Badge tone="accent">your comment</Badge>
             )}
             <span className="font-semibold">{f.source === "ai" ? f.title : ""}</span>
+            {f.carriedFromId && <span className="text-xs text-muted" title="The file hasn't changed since the earlier review, so this finding was carried over from it.">carried over</span>}
             {!f.inDiff && f.line && <span className="text-xs text-warn" title="This line is outside the diff. The finding will go in the review summary.">outside diff · L{f.line}</span>}
             <span className="ml-auto text-xs text-muted">
               {f.state === "accepted" && <span className="text-ok">✓ will be posted</span>}

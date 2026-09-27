@@ -67,6 +67,7 @@ export function ProvidersSection({ isAdmin }: { isAdmin: boolean }) {
                 </div>
                 <div className="truncate font-mono text-xs text-muted">
                   {p.model} · {p.baseUrl} · {p.maxContextTokens.toLocaleString()} ctx
+                  {p.monthlyBudgetUsd != null && <> · ${p.monthlyBudgetUsd}/mo budget</>}
                 </div>
               </div>
               {isAdmin && (
@@ -116,6 +117,9 @@ function ProviderForm({ existing, onClose, onSaved }: { existing: AiProviderInfo
     jsonMode: existing?.jsonMode ?? true,
     isLocal: existing?.isLocal ?? false,
     isDefault: existing?.isDefault ?? false,
+    inputCostPerMTok: existing?.inputCostPerMTok?.toString() ?? "",
+    outputCostPerMTok: existing?.outputCostPerMTok?.toString() ?? "",
+    monthlyBudgetUsd: existing?.monthlyBudgetUsd?.toString() ?? "",
   });
   const [note, setNote] = useState<string | null>(null);
   const [models, setModels] = useState<string[]>([]);
@@ -127,8 +131,12 @@ function ProviderForm({ existing, onClose, onSaved }: { existing: AiProviderInfo
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   // Leaving the key blank while editing keeps the stored one.
+  const money = (v: string) => (v.trim() === "" ? null : Number(v));
   const payload = () => ({
     ...form,
+    inputCostPerMTok: money(form.inputCostPerMTok),
+    outputCostPerMTok: money(form.outputCostPerMTok),
+    monthlyBudgetUsd: money(form.monthlyBudgetUsd),
     apiKey: existing && !form.apiKey ? undefined : form.apiKey,
     id: existing?.id,
   });
@@ -234,6 +242,17 @@ function ProviderForm({ existing, onClose, onSaved }: { existing: AiProviderInfo
         <Field label="Temperature" hint={form.type === "anthropic" ? "Not sent to Claude models" : "Low values give steadier reviews"}>
           <Input type="number" min={0} max={2} step={0.05} value={form.temperature} disabled={form.type === "anthropic"} onChange={(e) => set("temperature", Number(e.target.value))} />
         </Field>
+        <div className="grid grid-cols-3 gap-3 sm:col-span-2">
+          <Field label="Input price" hint="USD per 1M tokens">
+            <Input type="number" min={0} step="0.01" value={form.inputCostPerMTok} onChange={(e) => set("inputCostPerMTok", e.target.value)} placeholder="not priced" />
+          </Field>
+          <Field label="Output price" hint="USD per 1M tokens">
+            <Input type="number" min={0} step="0.01" value={form.outputCostPerMTok} onChange={(e) => set("outputCostPerMTok", e.target.value)} placeholder="not priced" />
+          </Field>
+          <Field label="Monthly budget" hint="USD, all users combined">
+            <Input type="number" min={0} step="1" value={form.monthlyBudgetUsd} onChange={(e) => set("monthlyBudgetUsd", e.target.value)} placeholder="unlimited" />
+          </Field>
+        </div>
         <div className="space-y-2 sm:col-span-2">
           {form.type !== "anthropic" && (
             <label className="flex items-center gap-2 text-sm">

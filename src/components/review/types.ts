@@ -30,7 +30,11 @@ export type ReviewListItem = { id: string; status: string; model: string; headSh
 
 export type Review = {
   id: string;
-  status: "running" | "completed" | "failed";
+  status: "queued" | "running" | "completed" | "failed";
+  trigger: "manual" | "webhook";
+  baseReviewId: string | null;
+  unchangedFiles: string[];
+  costUsd: number;
   model: string;
   headSha: string;
   instructions: string | null;
@@ -64,6 +68,7 @@ export type Finding = {
   title: string;
   body: string;
   suggestion: string | null;
+  carriedFromId: string | null;
   state: "pending" | "accepted" | "dismissed" | "posted";
 };
 

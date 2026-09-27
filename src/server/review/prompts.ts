@@ -54,6 +54,7 @@ export function summaryUserPrompt(opts: {
   files: { path: string; status: string; additions: number; deletions: number }[];
   findings: { path: string; line: number | null; severity: string; title: string }[];
   instructions?: string | null;
+  note?: string | null;
 }) {
   const files = opts.files
     .slice(0, 200)
@@ -69,6 +70,7 @@ export function summaryUserPrompt(opts: {
     `Pull request: ${opts.title}`,
     opts.description ? `Description:\n${opts.description.slice(0, 3000)}` : "",
     opts.instructions ? `Tech lead's review focus:\n${opts.instructions}` : "",
+    opts.note ?? "",
     `Changed files:\n${files}`,
     `Line-level findings from the detailed review:\n${findings}`,
   ]

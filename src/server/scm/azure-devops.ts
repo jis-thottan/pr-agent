@@ -359,7 +359,7 @@ export class AzureDevOpsProvider implements ScmProvider {
     try {
       return await this.text(await this.send(`${this.repoApi(project, repo)}/blobs/${objectId}?$format=octetstream`, { raw: true }));
     } catch (err) {
-      if ((err as AdoError).status === 404) return "";
+      if ((err as AdoError).status === 404) return null; // shown without a diff rather than as an empty file
       throw err;
     }
   }

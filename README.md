@@ -5,6 +5,8 @@ A self-hosted web app for tech leads to review pull requests with AI. The AI dra
 - Browse the repositories and PRs your **GitHub** and **Azure DevOps** accounts can access, and see every changed file in a code-review diff viewer.
 - Run an AI review against **any OpenAI-compatible endpoint**, such as a local model (Ollama, LM Studio, vLLM, LocalAI, llama.cpp) or a cloud provider (OpenAI, AI Foundry, OpenRouter, Groq and others). Anthropic, Google Gemini and Azure OpenAI can also be used through their **native APIs**.
 - Save your review settings as **profiles**, and keep team-wide rules in a **`.pr-review.yml`** file in the repository.
+- Get **automatic draft reviews** from webhooks when PRs are opened or updated. After a push, only the changed files are re-reviewed.
+- **Ask questions about a PR** in a chat grounded in its diff and findings, and keep spending in check with per-provider and per-user **budgets**.
 - Accept, edit or dismiss each finding, add your own line comments and suggestions, then post one grouped review (inline comments, a summary, and Approve / Comment / Request changes) back to the PR.
 
 > Supported code hosts: GitHub (github.com and Enterprise Server) and Azure DevOps (Services and Server). See the [Roadmap](#roadmap) for what's next.
@@ -91,7 +93,8 @@ PR files ─► repository rules (.pr-review.yml on the target branch)
 - A review with any **critical** finding never suggests *Approve*.
 - Nothing is posted until you click **Submit review**. Only findings you **accepted** are posted. Edited findings count as accepted.
 - If new commits are pushed after a review, the workspace warns you. Comments stay anchored to the reviewed commit.
-- Reviews run in the background. You can keep reading the diff while they work.
+- Reviews run on a durable job queue stored in the database. You can keep reading the diff while they work. If the server restarts mid-review, the job is picked up again and retried, up to 3 attempts. Errors that retrying won't fix, such as a bad API key or an exhausted budget, fail straight away.
+- **Incremental reviews:** when an earlier AI review of the PR exists at an older commit, the run dialog offers to review only the files whose content changed since then. Findings on unchanged files are carried over with their accepted, dismissed or posted state, so nothing is posted twice.
 
 ### AI provider types
 
@@ -154,6 +157,30 @@ How the rules apply:
 - The repository's instructions and the reviewer's instructions are both sent. `ignore` patterns are combined. For `min_severity`, the stricter of the repository's and the reviewer's thresholds wins. `full_file_context: false` turns off full-file context even if the reviewer turned it on.
 - Unknown keys and invalid values are skipped with a warning, and the rest of the file still applies. The Overview tab shows the rules a review used, along with any warnings.
 
+## Automatic reviews (webhooks)
+
+Under **Settings → Automatic reviews → Add repository**, pick a connection, a repository, and optionally a review profile and model. Then choose what triggers a review: new PRs, new commits, or both. You can also skip drafts and review only changed files. The app gives you a webhook URL and a secret. **Webhook setup** shows the steps for each host:
+
+- **GitHub:** add a repository webhook with content type `application/json` and the secret, subscribed to **Pull requests** events. Requests are verified with `X-Hub-Signature-256`.
+- **Azure DevOps:** create two *Web Hooks* service hook subscriptions, one for **Pull request created** and one for **Pull request updated** (filtered to *Source branch updated*). Use basic authentication with the secret as the password.
+
+Each head commit is reviewed once, even when the host redelivers or sends several events. Automatic reviews are **drafts**: they appear under **Automatic draft reviews** in the Inbox and in the PR's review history, and nothing is posted until you submit. They run with the rule owner's connection, and count toward that user's budget.
+
+The code host must be able to reach the app. Set `PUBLIC_URL` to the address it should call, such as `https://pr-review.example.com`. Otherwise the URL is taken from how you opened the settings page.
+
+## Ask about a PR
+
+The **Ask** tab (key `4`) opens a chat about the pull request. Each question is answered from the PR description, the changed files and their diffs, and the latest review's findings. It can also include the full content of the file you have open. When the diff doesn't fit the model's context window, the file you're viewing and the files your question names are included first, and the answer says what was left out. Conversations are private to you and stored per PR. Secrets are masked for cloud providers, as with reviews.
+
+## Costs and budgets
+
+Give each AI provider an input and output price (USD per million tokens) to track cost. Local models can stay unpriced. Every model call is recorded: reviews, chat and connection tests. **Settings → Usage and budgets** shows month-to-date spend (UTC calendar month) for you and for each provider. Admins also see spend per user.
+
+- **Provider budget:** a monthly cap across all users, set on the provider.
+- **Per-user limit:** a monthly cap for each user, set by an admin in *Usage and budgets*.
+
+Before a review starts, its cost is estimated from the batches it will send, and it's refused if that would exceed a budget. Each model call is also checked, so a long review or chat stops once the cap is reached. A blocked request returns HTTP 402 with the amounts involved.
+
 ## The review workspace
 
 - File tree with change stats, a marker for the most severe finding, a filter, "with findings", "hide viewed", and viewed tracking. A file becomes unviewed again when it changes.
@@ -170,7 +197,7 @@ How the rules apply:
 | `n` / `p` | Next / previous file |
 | `a` / `d` / `u` / `e` | Accept / dismiss / reset / edit the focused finding |
 | `v` | Toggle the current file as viewed |
-| `1` `2` `3` | Overview / Files / Findings |
+| `1` `2` `3` `4` | Overview / Files / Findings / Ask |
 | `?` | Show shortcuts |
 
 ## Configuration
@@ -184,6 +211,10 @@ How the rules apply:
 | `COOKIE_SECURE` | `false` | Set to `true` behind HTTPS |
 | `AI_TIMEOUT_MS` | `300000` | Timeout for each model request |
 | `AI_CONCURRENCY` | `2` | Parallel model requests per review |
+| `JOB_CONCURRENCY` | `2` | Reviews each server process runs at once |
+| `JOB_WORKER` | on | Set to `off` to stop this process from running background jobs |
+| `JOB_STALE_AFTER_MS` | `120000` | How long a job can go without a heartbeat before it's retried |
+| `PUBLIC_URL` | – | Base URL that code hosts use for webhooks |
 | `HTTPS_PROXY`, `NO_PROXY` | – | Outbound proxy (the image sets `NODE_USE_ENV_PROXY=1`) |
 | `NODE_EXTRA_CA_CERTS` | – | Path to a corporate root CA bundle mounted into the container |
 
@@ -220,7 +251,11 @@ src/
     scm/                  ScmProvider interface, GitHub and Azure DevOps adapters
     ai/                   AiClient interface; OpenAI-compatible (+ Azure OpenAI), Anthropic and Gemini adapters
     profiles/             saved review profiles
-    review/               rules → filter → chunk → prompts → parse → engine → post
+    review/               rules → filter → chunk → prompts → parse → engine → post; incremental carry-forward
+    jobs/                 durable job queue (FOR UPDATE SKIP LOCKED) and the in-process worker
+    webhooks/             GitHub / Azure DevOps event parsing, signature checks, automatic reviews
+    chat/                 "Ask about this PR" context building
+    usage.ts              usage ledger, cost and budget checks
     db/                   Drizzle schema and client (Postgres or PGlite)
 drizzle/                  SQL migrations
 ```
@@ -233,6 +268,6 @@ drizzle/                  SQL migrations
 | Phase | Scope |
 |---|---|
 | 1 ✓ | Docker image, local accounts, multiple GitHub/GHES connections, any OpenAI-compatible model, diff workspace, AI review, accept/edit/dismiss, manual comments and suggestions, posting reviews, secret masking, audit log |
-| **2 ✓ (this release)** | Azure DevOps (PAT; threads and reviewer votes), native Anthropic, Azure OpenAI and Gemini adapters, saved review profiles, repo rules file (`.pr-review.yml`) |
-| 3 | Durable job queue and webhooks for automatic draft reviews, incremental review of new commits only, "ask about this PR" chat, cost budgets |
+| 2 ✓ | Azure DevOps (PAT; threads and reviewer votes), native Anthropic, Azure OpenAI and Gemini adapters, saved review profiles, repo rules file (`.pr-review.yml`) |
+| **3 ✓ (this release)** | Durable job queue and webhooks for automatic draft reviews, incremental review of new commits only, "ask about this PR" chat, cost budgets |
 | 4 | OIDC SSO (Entra ID / GitHub / Google), roles, audit log UI, team dashboard, GitHub App and Entra OAuth |

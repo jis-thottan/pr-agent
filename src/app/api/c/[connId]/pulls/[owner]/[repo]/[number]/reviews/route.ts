@@ -19,6 +19,8 @@ const body = z.discriminatedUnion("mode", [
     repoRules: z.boolean().default(true),
     // Recorded on the review; the dialog sends the profile's settings (possibly tweaked) explicitly.
     profileId: z.string().uuid().nullish(),
+    incremental: z.boolean().default(false),
+    baseReviewId: z.string().uuid().nullish(),
   }),
   // A review with no AI pass, for writing comments by hand.
   z.object({ mode: z.literal("manual") }),
@@ -68,8 +70,16 @@ export const POST = route<PrCtx>(async (req, { user, params }) => {
       minSeverity: input.minSeverity ?? null,
       repoRules: input.repoRules,
       profileId: input.profileId ?? null,
+      incremental: input.incremental,
+      baseReviewId: input.baseReviewId ?? null,
     },
   });
-  await audit(user.id, "review.start", { id, pr: `${owner}/${repo}#${number}`, provider: provider.name, model: provider.model });
+  await audit(user.id, "review.start", {
+    id,
+    pr: `${owner}/${repo}#${number}`,
+    provider: provider.name,
+    model: provider.model,
+    incremental: input.incremental,
+  });
   return { id };
 });
